@@ -63,7 +63,7 @@ Detaching the MCP toolsets from the sub-agent's `toolsets` list and invoking the
 
 To prevent entry-time crashes and handle regional endpoint failures in Python, apply two configuration steps.
 
-First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model only sees your Python Function Tool controller) and pin tool schema snapshots on the MCP toolset resource (via the CXAS Console tool-pinning workflow or application export/import):
+First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model only sees your Python Function Tool controller) and pin tool schema snapshots on the MCP toolset resource (see [`customer_idv_primary.json`](../../cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_primary/customer_idv_primary.json) and [`customer_idv_secondary.json`](../../cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_secondary/customer_idv_secondary.json) in the `cxas-scrapi` bundle):
 
 ```json
 {

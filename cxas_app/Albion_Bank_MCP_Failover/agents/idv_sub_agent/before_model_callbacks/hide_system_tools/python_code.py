@@ -1,6 +1,6 @@
 # CXAS runtime globals: CallbackContext, LlmRequest, LlmResponse and Part are injected by the sandbox (no imports).
 # ruff: noqa: F821
-"""before_model_callback: hides end_session and any returned controller tools on post-tool passes."""
+"""before_model_callback: hides end_session, transfer_to_agent, and any returned controller tools."""
 
 import logging
 from typing import Any, Optional
@@ -12,7 +12,7 @@ def before_model_callback(
     callback_context: CallbackContext,
     llm_request: LlmRequest,
 ) -> Optional[LlmResponse]:
-    """Hide end_session and any controller tool that just returned on this turn.
+    """Hide end_session, transfer_to_agent, and any controller tool that just returned on this turn.
 
     Args:
         callback_context: Runtime callback context with session state.
@@ -23,11 +23,12 @@ def before_model_callback(
     """
     try:
         llm_request.config.hide_tool("end_session")
+        llm_request.config.hide_tool("transfer_to_agent")
         for tool_name in _returned_tool_names(llm_request):
             llm_request.config.hide_tool(tool_name)
         return None
     except Exception:
-        logger.exception("idv_sub_agent before_model_callback failed")
+        logger.exception("hide_system_tools callback failed")
         return None
 
 

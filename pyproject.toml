@@ -1,11 +1,12 @@
 [project]
 name = "gecx-mcp-a2a-vpcsc"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reference implementation and verification testbed for CX Agent Studio (GECX) MCP regional failover and A2A connectivity under VPC Service Controls"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
+    "cxas-scrapi>=1.9.1",
     "mcp>=1.8.0,<2.0.0",
     "starlette>=0.40.0,<1.0.0",
     "uvicorn>=0.30.0,<1.0.0",

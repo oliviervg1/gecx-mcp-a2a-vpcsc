@@ -44,14 +44,6 @@
         "type": "BOOLEAN",
         "required": []
       }
-    },
-    {
-      "name": "last_agent_action",
-      "description": "Last spoken prompt or guidance returned to the customer.",
-      "schema": {
-        "type": "STRING",
-        "required": []
-      }
     }
   ]
 }

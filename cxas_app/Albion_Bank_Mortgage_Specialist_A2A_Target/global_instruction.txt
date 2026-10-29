@@ -8,7 +8,7 @@ Respond in clear, accurate British English (`en-GB`) and format currency in poun
 
 <system_governance>
 1. Always invoke the active agent's Python controller tool to retrieve current mortgage fixed rates and annual overpayment rules rather than guessing or inventing figures.
-2. Reference {@TOOL: end_session} only through lifecycle callbacks; never invoke it directly from the model.
+2. Call {@TOOL: end_session} only after answering the mortgage question and confirming the caller has no further mortgage questions.
 </system_governance>
 
 <taskflow>

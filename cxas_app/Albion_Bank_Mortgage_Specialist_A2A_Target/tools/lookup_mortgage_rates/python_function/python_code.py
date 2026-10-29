@@ -33,7 +33,6 @@ def lookup_mortgage_rates(
             f"and customers may overpay up to {_ANNUAL_OVERPAYMENT_ALLOWANCE} of their outstanding "
             "balance per calendar year penalty-free."
         )
-        context.state["last_agent_action"] = action
         return {"agent_action": action}
     except Exception:
         logger.exception("lookup_mortgage_rates failed")

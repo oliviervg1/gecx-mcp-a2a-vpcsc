@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Phase B verification script: A2A Protocol under an Enforced VPC-SC Perimeter.
 
-Executes five automated verification tests inside an enforced VPC-SC service perimeter:
+Executes five automated verification tests inside an enforced VPC-SC service perimeter
+using the cxas-scrapi SDK (Apps, Sessions, and AgentServiceClient):
 - Test 2-pre: Enforced perimeter prior to adding https://ces.googleapis.com to CXAS allowedOrigins.
 - Test 2A: Default CXAS service agent under enforced VPC-SC without an Egress Rule (reproduces 403 VPC_SERVICE_CONTROLS).
 - Test 2B-i: Custom Service Account on RemoteAgentTool while only default CXAS SA is in Egress Rule (reproduces 403 VPC_SERVICE_CONTROLS on Custom SA).
@@ -16,8 +17,9 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+import uuid
 
-from run_phase_a_mcp_and_a2a_baseline import CxasTestClient, build_a2a_tool_body
+from run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
 
 def run_cmd(cmd: list[str]) -> str:
@@ -71,6 +73,14 @@ def extract_a2a_spans(resp: dict[str, Any]) -> list[dict[str, Any]]:
         ):
             matched.append({"name": span.get("name"), "attributes": attrs})
     return matched
+
+
+def run_a2a_turn(client: CxasTestClient, caller_app_id: str, prompt: str) -> tuple[int, dict[str, Any]]:
+    """Runs the opening greeting turn followed by the mortgage A2A query turn via cxas-scrapi Sessions."""
+    session_id = f"s2-{uuid.uuid4().hex[:8]}"
+    client.run_session(caller_app_id, "hi", session_id=session_id)
+    status, resp, _ = client.run_session(caller_app_id, prompt, session_id=session_id)
+    return status, resp
 
 
 def update_perimeter(
@@ -152,7 +162,7 @@ def run_phase_b(
     mcp_url: str,
     output_file: str,
 ) -> dict[str, Any]:
-    """Executes Phase B VPC-SC A2A verification tests (2-pre, 2A, 2B-i, 2B-ii, 2C)."""
+    """Executes Phase B VPC-SC A2A verification tests (2-pre, 2A, 2B-i, 2B-ii, 2C) via cxas-scrapi."""
     results: dict[str, Any] = {}
     caller_app_id = "personal-banking-a2a-caller"
     mortgage_app_id = "mortgage-specialist-app"
@@ -235,25 +245,19 @@ def run_phase_b(
         remove_iam_cmd.append(f"--account={client.account}")
     subprocess.run(remove_iam_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
-    # Reset SecuritySettings allowedOrigins to empty so Test 2-pre is reproducible across re-runs
-    client.request(
-        "PATCH",
-        f"{client.base_url}/securitySettings?updateMask=endpointControlPolicy",
-        {
-            "endpointControlPolicy": {
-                "enforcementScope": "VPCSC_ONLY",
-                "allowedOrigins": [],
-            }
-        },
-        expect_error=True,
-    )
+    # Reset SecuritySettings allowedOrigins to empty via AgentServiceClient so Test 2-pre is reproducible
+    client.update_security_settings(allowed_origins=[])
 
-    # Reset A2A tool to default CXAS service agent
-    client.upsert_tool(
-        caller_app_id,
-        "mortgage_specialist",
-        build_a2a_tool_body(client.project_id, client.location, mortgage_app_id, custom_sa=None),
-        "remoteAgentTool",
+    # Push A2A target and caller bundles with default CXAS service agent (custom_sa=None) via cxas-scrapi
+    client.push_app_bundle(
+        app_id=mortgage_app_id,
+        bundle_name="Albion_Bank_Mortgage_Specialist_A2A_Target",
+    )
+    client.push_app_bundle(
+        app_id=caller_app_id,
+        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
+        replacements={"MORTGAGE_SPECIALIST_APP_ID": mortgage_app_id},
+        custom_sa=None,
     )
 
     # 1. Test 2-pre: Enforced perimeter prior to allowedOrigins configuration
@@ -268,45 +272,36 @@ def run_phase_b(
         account=client.account,
     )
     time.sleep(20)
-    st_pre, resp_pre, _ = client.run_session(caller_app_id, prompt)
+    st_pre, resp_pre = run_a2a_turn(client, caller_app_id, prompt)
     spans_pre = extract_a2a_spans(resp_pre)
     print(f"Test 2-pre -> HTTP {st_pre}, spans={json.dumps(spans_pre, indent=2)}")
     results["test_2_pre"] = {"status": st_pre, "spans": spans_pre, "response": resp_pre}
 
     # 2. Configure CXAS SecuritySettings allowedOrigins and wait for cache expiry
     print("\n=== Updating CXAS SecuritySettings.endpointControlPolicy.allowedOrigins ===")
-    client.request(
-        "PATCH",
-        f"{client.base_url}/securitySettings?updateMask=endpointControlPolicy",
-        {
-            "endpointControlPolicy": {
-                "enforcementScope": "VPCSC_ONLY",
-                "allowedOrigins": [
-                    "https://ces.googleapis.com",
-                    mcp_url.rstrip("/"),
-                ],
-            }
-        },
+    client.update_security_settings(
+        allowed_origins=[
+            "https://ces.googleapis.com",
+            mcp_url.rstrip("/"),
+        ]
     )
     print("Waiting 190s (idle) for CXAS SecuritySettings propagation...")
     time.sleep(190)
 
     # 3. Test 2A: Default CXAS Service Agent without VPC-SC Egress Rule -> 403 VPC_SERVICE_CONTROLS
     print("\n=== Test 2A: Default CXAS Service Agent Without VPC-SC Egress Rule ===")
-    st_2a, resp_2a, _ = client.run_session(caller_app_id, prompt)
+    st_2a, resp_2a = run_a2a_turn(client, caller_app_id, prompt)
     spans_2a = extract_a2a_spans(resp_2a)
     print(f"Test 2A -> HTTP {st_2a}, spans={json.dumps(spans_2a, indent=2)}")
     results["test_2A"] = {"status": st_2a, "spans": spans_2a, "response": resp_2a}
 
-    # 4. Test 2B-i: Custom SA on RemoteAgentTool while only default CXAS SA is in Egress Rule
+    # 4. Test 2B-i: Push Caller bundle with Custom SA on RemoteAgentTool via cxas-scrapi Apps.import_app
     print("\n=== Test 2B-i: Custom SA on RemoteAgentTool Without Egress Rule for Custom SA ===")
-    client.upsert_tool(
-        caller_app_id,
-        "mortgage_specialist",
-        build_a2a_tool_body(
-            client.project_id, client.location, mortgage_app_id, custom_sa=custom_sa
-        ),
-        "remoteAgentTool",
+    client.push_app_bundle(
+        app_id=caller_app_id,
+        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
+        replacements={"MORTGAGE_SPECIALIST_APP_ID": mortgage_app_id},
+        custom_sa=custom_sa,
     )
     update_perimeter(
         policy_id,
@@ -319,7 +314,7 @@ def run_phase_b(
     )
     print("Waiting 70s for tool configuration and perimeter propagation...")
     time.sleep(70)
-    st_2bi, resp_2bi, _ = client.run_session(caller_app_id, prompt)
+    st_2bi, resp_2bi = run_a2a_turn(client, caller_app_id, prompt)
     spans_2bi = extract_a2a_spans(resp_2bi)
     print(f"Test 2B-i -> HTTP {st_2bi}, spans={json.dumps(spans_2bi, indent=2)}")
     results["test_2Bi"] = {"status": st_2bi, "spans": spans_2bi, "response": resp_2bi}
@@ -336,7 +331,7 @@ def run_phase_b(
         account=client.account,
     )
     time.sleep(25)
-    st_2bii, resp_2bii, _ = client.run_session(caller_app_id, prompt)
+    st_2bii, resp_2bii = run_a2a_turn(client, caller_app_id, prompt)
     spans_2bii = extract_a2a_spans(resp_2bii)
     print(f"Test 2B-ii -> HTTP {st_2bii}, spans={json.dumps(spans_2bii, indent=2)}")
     results["test_2Bii"] = {"status": st_2bii, "spans": spans_2bii, "response": resp_2bii}
@@ -357,7 +352,7 @@ def run_phase_b(
     run_cmd(iam_cmd)
     print("Waiting 60s for IAM binding propagation...")
     time.sleep(60)
-    st_2c, resp_2c, _ = client.run_session(caller_app_id, prompt)
+    st_2c, resp_2c = run_a2a_turn(client, caller_app_id, prompt)
     spans_2c = extract_a2a_spans(resp_2c)
     print(f"Test 2C -> HTTP {st_2c}")
     print(json.dumps(resp_2c, indent=2))
@@ -370,7 +365,7 @@ def run_phase_b(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run Phase B VPC-SC A2A verification tests."
+        description="Run Phase B VPC-SC A2A verification tests via cxas-scrapi."
     )
     parser.add_argument("--project-id", required=True, help="Target GCP project ID")
     parser.add_argument(

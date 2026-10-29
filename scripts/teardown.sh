@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Removes the test VPC-SC service perimeter, deletes the test CXAS applications
-# and resets SecuritySettings allowedOrigins, deletes the Cloud Run FastMCP
-# service and test custom Service Account, and optionally deletes the GCP project.
+# and resets SecuritySettings allowedOrigins via cxas-scrapi, deletes the Cloud Run
+# FastMCP service and test custom Service Account, and optionally deletes the GCP project.
 #
 # Usage:
 #   ./scripts/teardown.sh \
@@ -57,23 +57,31 @@ if [[ "${DELETE_PROJECT}" == "true" ]]; then
   exit 0
 fi
 
-TOKEN=$(gcloud auth print-access-token)
-BASE_URL="https://ces.googleapis.com/v1beta/projects/${PROJECT_ID}/locations/${LOCATION}"
+echo "2. Deleting test CXAS applications and resetting SecuritySettings via cxas-scrapi in ${PROJECT_ID} (${LOCATION})..."
+uv run python - "${PROJECT_ID}" "${LOCATION}" <<'PY'
+import sys
+from google.api_core import exceptions as google_exceptions
+from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
-echo "2. Deleting test CXAS applications and resetting SecuritySettings in ${PROJECT_ID} (${LOCATION})..."
-for app_id in scenario1-mcp-repro personal-banking-a2a-caller mortgage-specialist-app; do
-  curl -sS -X DELETE \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -H "x-goog-user-project: ${PROJECT_ID}" \
-    "${BASE_URL}/apps/${app_id}?force=true" >/dev/null || true
-done
+project_id, location = sys.argv[1], sys.argv[2]
+client = CxasTestClient(project_id=project_id, location=location)
 
-curl -sS -X PATCH \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "x-goog-user-project: ${PROJECT_ID}" \
-  -H "Content-Type: application/json" \
-  -d '{"endpointControlPolicy":{"enforcementScope":"VPCSC_ONLY","allowedOrigins":[]}}' \
-  "${BASE_URL}/securitySettings?updateMask=endpointControlPolicy" >/dev/null || true
+for app_id in ("scenario1-mcp-repro", "personal-banking-a2a-caller", "mortgage-specialist-app"):
+    app_name = client.app_resource_name(app_id)
+    try:
+        client.apps.delete_app(app_name=app_name, force=True)
+        print(f"Deleted CXAS app: {app_name}")
+    except google_exceptions.NotFound:
+        pass
+    except Exception as exc:
+        print(f"Warning deleting {app_name}: {exc}")
+
+try:
+    client.update_security_settings(allowed_origins=[])
+    print("Reset CXAS SecuritySettings allowedOrigins to [].")
+except Exception as exc:
+    print(f"Warning resetting SecuritySettings: {exc}")
+PY
 
 echo "3. Deleting Cloud Run service ${SERVICE_NAME} in ${REGION}..."
 gcloud run services delete "${SERVICE_NAME}" \

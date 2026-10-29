@@ -4,18 +4,28 @@ All notable changes to the Albion Bank CX Agent Studio (GECX) MCP Regional Failo
 
 ## [0.2.1] - 2026-10-29
 
-### Removed — Duplicate Root `tools/` Directory & Unreachable Callback Code
+### Added — Concrete MCP `toolOverrides` Schema Snapshot Example in `cxas_app/`
 
-- **Why:** Eliminate duplicated tool source files and unreachable callback paths after introducing the canonical `cxas-scrapi` application bundles under `cxas_app/`.
-- **Fix:** Removed the standalone duplicate `tools/verify_customer_identity/` directory at the repository root (consolidating on [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)), removed unreachable `release_line` / `hide_system_tools` callbacks and unused `call_complete` / `escalation_reason` state variables from the two A2A applications, and removed the unreachable `target_agent` transfer branch from `idv_sub_agent`'s `before_model_callback`.
-- **Test:** Verified all three apps pass `cxas lint` with 0 errors and 0 warnings, and all 17 unit tests pass in `pytest`.
-- **Docs:** Updated [`README.md`](README.md), [`docs/README.md`](docs/README.md), [`docs/guides/mcp_and_a2a_technical_guide.md`](docs/guides/mcp_and_a2a_technical_guide.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).
+- **Why:** Provide a concrete, `cxas lint`-validated (`google.cloud.ces_v1beta.types.Toolset.from_json`) example of `mcpToolset.toolOverrides` (`tool`, `descriptionOverride`, and `snapshot.inputSchema`) directly inside the `cxas-scrapi` application bundle.
+- **Fix:** Added `toolOverrides` for `verify_customer` to [`cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_primary/customer_idv_primary.json`](cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_primary/customer_idv_primary.json) and [`cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_secondary/customer_idv_secondary.json`](cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_secondary/customer_idv_secondary.json), and added schema/callback path assertions in [`tests/test_cxas_apps.py`](tests/test_cxas_apps.py).
+
+### Changed — Refactored Verification Scripts (`scripts/`) to Use `cxas-scrapi` & Aligned A2A `end_session` Handling
+
+- **Why:** Replace raw `urllib.request` / `curl` REST patching in the verification and teardown scripts with the `cxas-scrapi` SDK (`Apps`, `Agents`, `Tools`, `Sessions`, and `AgentServiceClient`), and align `global_instruction.txt` with `instruction.txt` across the A2A apps.
+- **Fix:** Refactored [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](scripts/run_phase_a_mcp_and_a2a_baseline.py), [`scripts/run_phase_b_vpcsc_a2a.py`](scripts/run_phase_b_vpcsc_a2a.py), and [`scripts/teardown.sh`](scripts/teardown.sh) to stage and import the `cxas_app/` bundles via `Apps.import_app(..., conflict_strategy="OVERWRITE")`, mutate agents/toolsets via `Agents.update_agent` and `Tools.update_tool`, update `SecuritySettings` via `AgentServiceClient.update_security_settings`, and execute conversational turns via `Sessions.run`. Renamed `idv_sub_agent`'s `before_model_callback` from `agent_transfer` to `hide_system_tools` (hiding both `end_session` and `transfer_to_agent`), and updated the A2A applications to invoke `{@TOOL: end_session}` after the caller confirms they have no further questions.
+- **Test:** Verified all three apps pass `cxas lint` with 0 errors and 0 warnings, and all 18 unit tests pass in `pytest`.
+- **Docs:** Updated [`README.md`](README.md), [`cxas_app/README.md`](cxas_app/README.md), [`docs/README.md`](docs/README.md), [`docs/guides/mcp_and_a2a_technical_guide.md`](docs/guides/mcp_and_a2a_technical_guide.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).
+
+### Removed — Duplicate Root `tools/` Directory, Unreachable Callbacks & Write-Only `last_agent_action` State Variable
+
+- **Why:** Eliminate duplicated tool source files, unreachable callback paths, and write-only state variables across the repository.
+- **Fix:** Removed the standalone duplicate `tools/verify_customer_identity/` directory at the repository root (consolidating on [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)), removed unreachable `release_line` / `hide_system_tools` callbacks and unused `call_complete` / `escalation_reason` state variables from the two A2A applications, removed the unreachable `target_agent` transfer branch from `idv_sub_agent`, and removed the write-only `last_agent_action` state variable across all three applications.
 
 ## [0.2.0] - 2026-10-29
 
 ### Added — Complete `cxas-scrapi`-Compatible Application Bundles (`cxas_app/`)
 
-- **Why:** Provide complete, `cxas lint`-validated CX Agent Studio application bundles in the standard `cxas-scrapi` format (`app.json`, `global_instruction.txt`, `environment.json`, `agents/`, `tools/`, and `toolsets/`) so engineers can inspect, lint (`cxas lint`), push (`cxas push`), and pull (`cxas pull`) the agents directly alongside the automated REST verification scripts.
+- **Why:** Provide complete, `cxas lint`-validated CX Agent Studio application bundles in the standard `cxas-scrapi` format (`app.json`, `global_instruction.txt`, `environment.json`, `agents/`, `tools/`, and `toolsets/`) so engineers can inspect, lint (`cxas lint`), push (`cxas push`), and pull (`cxas pull`) the agents directly alongside the automated verification scripts.
 - **Fix:** Added [`cxas_app/Albion_Bank_MCP_Failover/`](cxas_app/Albion_Bank_MCP_Failover/), [`cxas_app/Albion_Bank_Personal_Banking_A2A_Caller/`](cxas_app/Albion_Bank_Personal_Banking_A2A_Caller/), and [`cxas_app/Albion_Bank_Mortgage_Specialist_A2A_Target/`](cxas_app/Albion_Bank_Mortgage_Specialist_A2A_Target/), plus [`cxaslint.yaml`](cxaslint.yaml) and [`cxas_app/README.md`](cxas_app/README.md).
 - **Test:** Verified all three application bundles pass `cxas lint` with 0 errors and 0 warnings, and added [`tests/test_cxas_apps.py`](tests/test_cxas_apps.py) (`17 passed` across `pytest`).
 - **Docs:** Updated [`README.md`](README.md), [`cxas_app/README.md`](cxas_app/README.md), [`docs/README.md`](docs/README.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).

@@ -5,7 +5,28 @@
     "serverAddress": "https://YOUR_SECONDARY_MCP_URL/mcp2/",
     "apiAuthentication": {
       "serviceAgentIdTokenAuthConfig": {}
-    }
+    },
+    "toolOverrides": [
+      {
+        "tool": "verify_customer",
+        "descriptionOverride": "Verifies a banking customer's identity status by customer ID.",
+        "snapshot": {
+          "description": "Verifies a banking customer's identity status by customer ID.",
+          "inputSchema": {
+            "type": "OBJECT",
+            "properties": {
+              "customer_id": {
+                "type": "STRING",
+                "description": "The customer identifier (for example, CUST-101)."
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        }
+      }
+    ]
   },
   "toolFakeConfig": {
     "enableFakeMode": true,

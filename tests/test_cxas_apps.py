@@ -1,4 +1,4 @@
-"""Offline unit tests for the cxas-scrapi application bundles under cxas_app/."""
+"""Offline unit tests for the cxas-scrapi application bundles and verification scripts."""
 
 import builtins
 import importlib.util
@@ -6,8 +6,12 @@ import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+import zipfile
 
+from google.cloud.ces_v1beta import types
 import pytest
+
+from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CXAS_APP_DIR = REPO_ROOT / "cxas_app"
@@ -80,7 +84,7 @@ def _load_py(
 
 @pytest.mark.parametrize("app_name", APP_NAMES)
 def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
-    """Verifies app.json, environment.json, agent configs, childAgents tree, and instructions."""
+    """Verifies app.json, environment.json, agent configs, callbacks, childAgents tree, and instructions."""
     app_root = CXAS_APP_DIR / app_name
     app_json = json.loads((app_root / "app.json").read_text(encoding="utf-8"))
     assert app_json["name"] == app_name
@@ -106,6 +110,7 @@ def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
     assert (agents_dir / root_agent / f"{root_agent}.json").exists()
 
     parents_by_child: dict[str, list[str]] = {}
+    referenced_agent_callbacks: set[Path] = set()
     for agent_dir in agents_dir.iterdir():
         if not agent_dir.is_dir():
             continue
@@ -118,35 +123,92 @@ def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
         for forbidden in FORBIDDEN_TRANSFER_WORDS:
             assert forbidden not in inst_text.lower(), f"{inst_path} mentions '{forbidden}'"
 
+        for cb_key in (
+            "beforeAgentCallbacks",
+            "afterAgentCallbacks",
+            "beforeModelCallbacks",
+            "afterModelCallbacks",
+            "beforeToolCallbacks",
+            "afterToolCallbacks",
+        ):
+            for cb in cfg.get(cb_key, []):
+                cb_path = (app_root / cb["pythonCode"]).resolve()
+                assert cb_path.exists(), f"Missing callback pythonCode: {cb_path}"
+                referenced_agent_callbacks.add(cb_path)
+
         for child in cfg.get("childAgents", []):
             parents_by_child.setdefault(child, []).append(agent_dir.name)
+
+    actual_agent_callbacks = {p.resolve() for p in agents_dir.rglob("python_code.py")}
+    assert actual_agent_callbacks == referenced_agent_callbacks, (
+        f"Unreferenced callback python_code.py under {agents_dir}: "
+        f"{actual_agent_callbacks - referenced_agent_callbacks}"
+    )
 
     for child, parents in parents_by_child.items():
         assert len(parents) == 1, f"Sub-agent {child} has multiple parents: {parents}"
 
-    for tool_py in (app_root / "tools").rglob("python_code.py"):
-        tool_source = tool_py.read_text(encoding="utf-8").lower()
-        for forbidden in FORBIDDEN_TRANSFER_WORDS:
-            assert forbidden not in tool_source, f"{tool_py} mentions '{forbidden}'"
+    tools_dir = app_root / "tools"
+    if tools_dir.exists():
+        for tool_dir in tools_dir.iterdir():
+            if not tool_dir.is_dir():
+                continue
+            t_cfg = json.loads((tool_dir / f"{tool_dir.name}.json").read_text(encoding="utf-8"))
+            if "pythonFunction" in t_cfg:
+                py_path = app_root / t_cfg["pythonFunction"]["pythonCode"]
+                assert py_path.exists(), f"Missing tool pythonCode: {py_path}"
+
+        for tool_py in tools_dir.rglob("python_code.py"):
+            tool_source = tool_py.read_text(encoding="utf-8").lower()
+            for forbidden in FORBIDDEN_TRANSFER_WORDS:
+                assert forbidden not in tool_source, f"{tool_py} mentions '{forbidden}'"
+
+    toolsets_dir = app_root / "toolsets"
+    if toolsets_dir.exists():
+        for ts_dir in toolsets_dir.iterdir():
+            if not ts_dir.is_dir():
+                continue
+            ts_path = ts_dir / f"{ts_dir.name}.json"
+            ts_text = ts_path.read_text(encoding="utf-8")
+            ts_cfg = json.loads(ts_text)
+            fake_code = ts_cfg.get("toolFakeConfig", {}).get("codeBlock", {}).get("pythonCode")
+            if fake_code:
+                assert (app_root / fake_code).exists(), f"Missing toolset fake pythonCode: {fake_code}"
+            parsed_ts = types.Toolset.from_json(ts_text)
+            assert len(parsed_ts.mcp_toolset.tool_overrides) == 1
+            override = parsed_ts.mcp_toolset.tool_overrides[0]
+            assert override.tool == "verify_customer"
+            assert "customer_id" in override.snapshot.input_schema.properties
 
 
-def test_idv_sub_agent_before_model_hides_end_session_and_returned_tools(
+def test_idv_sub_agent_hide_system_tools_on_both_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verifies idv_sub_agent before_model_callback hides end_session and returned tools."""
+    """Verifies idv_sub_agent hide_system_tools callback hides system tools and returned tools."""
     app_root = CXAS_APP_DIR / "Albion_Bank_MCP_Failover"
     cb_mod, ctx = _load_py(
         app_root
         / "agents"
         / "idv_sub_agent"
         / "before_model_callbacks"
-        / "agent_transfer"
+        / "hide_system_tools"
         / "python_code.py",
         monkeypatch,
     )
-    hidden_tools: list[str] = []
+
+    # Non-tool pass hides end_session and transfer_to_agent.
+    non_tool_hidden: list[str] = []
+    non_tool_req = SimpleNamespace(
+        config=SimpleNamespace(hide_tool=lambda name: non_tool_hidden.append(name)),
+        contents=[SimpleNamespace(parts=[FakePart(text="My customer ID is CUST-101.")])],
+    )
+    assert cb_mod.before_model_callback(ctx, non_tool_req) is None
+    assert non_tool_hidden == ["end_session", "transfer_to_agent"]
+
+    # Post-tool pass hides end_session, transfer_to_agent, and verify_customer_identity.
+    post_tool_hidden: list[str] = []
     tool_req = SimpleNamespace(
-        config=SimpleNamespace(hide_tool=lambda name: hidden_tools.append(name)),
+        config=SimpleNamespace(hide_tool=lambda name: post_tool_hidden.append(name)),
         contents=[
             SimpleNamespace(
                 parts=[
@@ -158,7 +220,7 @@ def test_idv_sub_agent_before_model_hides_end_session_and_returned_tools(
         ],
     )
     assert cb_mod.before_model_callback(ctx, tool_req) is None
-    assert hidden_tools == ["end_session", "verify_customer_identity"]
+    assert post_tool_hidden == ["end_session", "transfer_to_agent", "verify_customer_identity"]
 
 
 def test_route_to_idv_and_silent_before_model_transfer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,3 +363,66 @@ def test_lookup_mortgage_rates_and_toolset_fakes(monkeypatch: pytest.MonkeyPatch
     )
     sec_ok = secondary_fake.fake_tool_call(None, {"customer_id": "CUST-101"}, None)
     assert sec_ok["text_output"][0]["region"] == "europe-west1-secondary"
+
+
+def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies CxasTestClient.push_app_bundle substitutes placeholders and calls Apps.import_app."""
+    captured_zip_entries: dict[str, str] = {}
+
+    class FakeApps:
+        def __init__(self, project_id: str, location: str) -> None:
+            self.project_id = project_id
+            self.location = location
+            self.creds = "fake-creds"
+
+        def get_app(self, app_name: str) -> SimpleNamespace:
+            return SimpleNamespace(name=app_name)
+
+        def import_app(
+            self,
+            app_name: str,
+            local_path: str,
+            conflict_strategy: str,
+        ) -> SimpleNamespace:
+            assert conflict_strategy == "OVERWRITE"
+            with zipfile.ZipFile(local_path) as zf:
+                for member in zf.namelist():
+                    if member.endswith(".json"):
+                        captured_zip_entries[member] = zf.read(member).decode("utf-8")
+            return SimpleNamespace(result=lambda: SimpleNamespace(name=app_name))
+
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Apps", FakeApps)
+    client = CxasTestClient(project_id="albion-test-proj", location="eu")
+
+    # 1. Push A2A Caller bundle without custom_sa (default CXAS service agent)
+    client.push_app_bundle(
+        app_id="personal-banking-a2a-caller",
+        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
+        replacements={"MORTGAGE_SPECIALIST_APP_ID": "mortgage-specialist-app"},
+        custom_sa=None,
+    )
+    a2a_json = json.loads(
+        captured_zip_entries["agent/tools/mortgage_specialist/mortgage_specialist.json"]
+    )
+    url = a2a_json["remoteAgentTool"]["agentCard"]["supportedInterfaces"][0]["url"]
+    assert "projects/albion-test-proj/locations/eu/apps/mortgage-specialist-app" in url
+    assert "apiAuthentication" not in a2a_json["remoteAgentTool"]
+
+    # 2. Push A2A Caller bundle with custom_sa
+    client.push_app_bundle(
+        app_id="personal-banking-a2a-caller",
+        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
+        replacements={"MORTGAGE_SPECIALIST_APP_ID": "mortgage-specialist-app"},
+        custom_sa="a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com",
+    )
+    a2a_json_sa = json.loads(
+        captured_zip_entries["agent/tools/mortgage_specialist/mortgage_specialist.json"]
+    )
+    assert (
+        a2a_json_sa["remoteAgentTool"]["apiAuthentication"]["serviceAccountAuthConfig"][
+            "serviceAccount"
+        ]
+        == "a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com"
+    )

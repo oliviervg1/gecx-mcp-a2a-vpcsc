@@ -31,7 +31,6 @@ def before_model_callback(
             return None
 
         callback_context.state["session_greeted"] = True
-        callback_context.state["last_agent_action"] = GREETING_TEXT
         return LlmResponse.from_parts(parts=[Part.from_text(text=GREETING_TEXT)])
     except Exception:
         logger.exception("session_greeting callback failed")

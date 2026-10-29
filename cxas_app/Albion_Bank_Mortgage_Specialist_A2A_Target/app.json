@@ -36,14 +36,5 @@
       "enableCloudLogging": true
     }
   },
-  "variableDeclarations": [
-    {
-      "name": "last_agent_action",
-      "description": "Last spoken prompt or guidance returned to the caller.",
-      "schema": {
-        "type": "STRING",
-        "required": []
-      }
-    }
-  ]
+  "variableDeclarations": []
 }
