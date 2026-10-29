@@ -11,6 +11,7 @@ using the cxas-scrapi SDK (Apps, Agents, Tools, Sessions):
 """
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 import shutil
@@ -66,6 +67,9 @@ class GcloudAccountCredentials(auth_credentials.Credentials):
     def refresh(self, request: Any) -> None:
         cmd = ["gcloud", "auth", "print-access-token", f"--account={self.account}"]
         self.token = subprocess.check_output(cmd, text=True).strip()
+        self.expiry = datetime.datetime.now(datetime.timezone.utc).replace(
+            tzinfo=None
+        ) + datetime.timedelta(minutes=55)
 
 
 class CxasTestClient:
@@ -113,9 +117,19 @@ class CxasTestClient:
         for item in tools_client.list_tools():
             if "/tools/" not in item.name:
                 continue
-            sys_name = getattr(getattr(item, "system_tool", None), "name", "")
-            if item.display_name == display_name or sys_name == display_name:
+            if item.display_name == display_name or item.system_tool.name == display_name:
                 return item.name
+
+        if display_name in ("end_session", "set_session_variables"):
+            req = types.ListToolsRequest(
+                parent=app_name,
+                filter="include_system_tools=true",
+            )
+            for item in tools_client.client.list_tools(request=req):
+                if item.display_name == display_name or item.system_tool.name == display_name:
+                    return item.name
+            return f"{app_name}/tools/{display_name}"
+
         raise KeyError(f"Tool '{display_name}' not found in {app_name}")
 
     def resolve_toolset_name(self, app_id: str, display_name: str) -> str | None:
@@ -218,7 +232,7 @@ class CxasTestClient:
                 conflict_strategy="OVERWRITE",
             )
             import_resp = lro.result()
-            warnings = list(getattr(import_resp, "warnings", []) or [])
+            warnings = list(import_resp.warnings)
             if warnings:
                 raise RuntimeError(
                     f"ImportApp reported validation warnings for {bundle_name}: {warnings}"
@@ -258,7 +272,7 @@ class CxasTestClient:
         return tools_client.create_tool(
             tool_id=toolset_id,
             display_name=toolset_id,
-            payload=mcp_dict,
+            payload=types.McpToolset.to_dict(mcp_proto),
             tool_type="mcp_toolset",
         )
 
@@ -327,7 +341,8 @@ class CxasTestClient:
         try:
             resp = sessions_client.run(session_id=session_id, text=text, modality="text")
             outputs_list = [
-                types.SessionOutput.to_dict(out) for out in getattr(resp, "outputs", [])
+                types.SessionOutput.to_dict(out, preserving_proto_field_name=False)
+                for out in resp.outputs
             ]
             raw_dict: dict[str, Any] = {
                 "outputs": outputs_list,
@@ -416,7 +431,7 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
         server_address=f"{mcp_url}/mcp1/",
         include_overrides=True,
     )
-    patched_dict = MessageToDict(patched_primary._pb)
+    patched_dict = MessageToDict(types.Toolset.pb(patched_primary))
     overrides = patched_dict.get("mcpToolset", {}).get("toolOverrides", [])
     snapshot_persisted = bool(overrides and overrides[0].get("snapshot"))
     print(f"Primary toolset snapshot persisted via Tools.update_tool: {snapshot_persisted}")

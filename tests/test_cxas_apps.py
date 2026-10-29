@@ -9,9 +9,11 @@ from typing import Any
 import zipfile
 
 from google.cloud.ces_v1beta import types
+from google.protobuf import struct_pb2
 import pytest
 
 from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
+from scripts.run_phase_b_vpcsc_a2a import extract_a2a_spans
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CXAS_APP_DIR = REPO_ROOT / "cxas_app"
@@ -400,30 +402,54 @@ def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
     class FakeTools:
         def __init__(self, app_name: str, creds: Any = None) -> None:
             self.app_name = app_name
+            self.client = SimpleNamespace(list_tools=lambda request: [])
 
         def list_tools(self) -> list[SimpleNamespace]:
             return [
                 SimpleNamespace(
                     name=f"{self.app_name}/tools/uuid-mortgage-123",
                     display_name="mortgage_specialist",
-                    system_tool=None,
+                    system_tool=SimpleNamespace(name=""),
                 ),
                 SimpleNamespace(
                     name=f"{self.app_name}/tools/uuid-verify-456",
                     display_name="verify_customer_identity",
-                    system_tool=None,
-                ),
-                SimpleNamespace(
-                    name=f"{self.app_name}/tools/uuid-end-789",
-                    display_name="end_session",
-                    system_tool=SimpleNamespace(name="end_session"),
+                    system_tool=SimpleNamespace(name=""),
                 ),
                 SimpleNamespace(
                     name=f"{self.app_name}/toolsets/uuid-primary-111",
                     display_name="customer_idv_primary",
-                    system_tool=None,
+                    system_tool=SimpleNamespace(name=""),
                 ),
             ]
+
+        def create_tool(
+            self,
+            tool_id: str,
+            display_name: str,
+            payload: dict[str, Any],
+            tool_type: str,
+        ) -> types.Toolset:
+            assert tool_type == "mcp_toolset"
+            return types.Toolset(
+                name=f"{self.app_name}/toolsets/{tool_id}",
+                display_name=display_name,
+                mcp_toolset=payload,
+            )
+
+        def update_tool(
+            self,
+            tool_name: str,
+            display_name: str,
+            mcp_toolset: types.McpToolset,
+            tool_fake_config: types.ToolFakeConfig,
+        ) -> types.Toolset:
+            return types.Toolset(
+                name=tool_name,
+                display_name=display_name,
+                mcp_toolset=mcp_toolset,
+                tool_fake_config=tool_fake_config,
+            )
 
     class FakeAuthorizedSession:
         def __init__(self, creds: Any) -> None:
@@ -501,3 +527,71 @@ def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
         client.resolve_toolset_name("scenario1-mcp-repro", "customer_idv_primary")
         == "projects/albion-test-proj/locations/eu/apps/scenario1-mcp-repro/toolsets/uuid-primary-111"
     )
+    assert (
+        client.resolve_tool_name("scenario1-mcp-repro", "end_session")
+        == "projects/albion-test-proj/locations/eu/apps/scenario1-mcp-repro/tools/end_session"
+    )
+
+    # 3. Verify upsert_mcp_toolset on both create (Test 1A) and update (Test 1B) paths
+    created_ts = client.upsert_mcp_toolset(
+        "scenario1-mcp-repro",
+        "customer_idv",
+        server_address="https://mcp.example.run.app/mcp1/",
+        include_overrides=False,
+    )
+    assert created_ts.mcp_toolset.server_address == "https://mcp.example.run.app/mcp1/"
+    assert not created_ts.mcp_toolset.tool_overrides
+
+    updated_ts = client.upsert_mcp_toolset(
+        "scenario1-mcp-repro",
+        "customer_idv_primary",
+        server_address="https://mcp.example.run.app/mcp1/",
+        include_overrides=True,
+    )
+    assert updated_ts.name.endswith("/toolsets/uuid-primary-111")
+    assert updated_ts.mcp_toolset.tool_overrides[0].tool == "verify_customer"
+    assert updated_ts.tool_fake_config.enable_fake_mode is False
+
+
+def test_run_session_camel_case_serialization_feeds_extract_a2a_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies run_session emits camelCase SessionOutput dicts that extract_a2a_spans parses."""
+
+    class FakeApps:
+        def __init__(self, project_id: str, location: str, creds: Any = None) -> None:
+            self.creds = creds
+
+    class FakeSessions:
+        def __init__(
+            self,
+            app_name: str,
+            project_id: str,
+            location: str,
+            creds: Any = None,
+        ) -> None:
+            self.app_name = app_name
+
+        def run(self, session_id: str, text: str, modality: str) -> SimpleNamespace:
+            attrs = struct_pb2.Struct()
+            attrs.update({"error": "PERMISSION_DENIED: VPC_SERVICE_CONTROLS"})
+            child_span = types.Span(name="RemoteAgentTool", attributes=attrs)
+            root_span = types.Span(name="AgentTurn", child_spans=[child_span])
+            out = types.SessionOutput(
+                text="Sorry, I could not reach the specialist.",
+                diagnostic_info={"root_span": root_span},
+            )
+            return SimpleNamespace(outputs=[out])
+
+        def get_structured_response(self, resp: Any) -> dict[str, Any]:
+            return {"agent_responses": ["Sorry, I could not reach the specialist."]}
+
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Apps", FakeApps)
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Sessions", FakeSessions)
+    client = CxasTestClient(project_id="albion-test-proj", location="eu")
+    status, raw_dict, _ = client.run_session("personal-banking-a2a-caller", "mortgage rates")
+    assert status == 200
+    spans = extract_a2a_spans(raw_dict)
+    assert len(spans) == 1
+    assert spans[0]["name"] == "RemoteAgentTool"
+    assert "VPC_SERVICE_CONTROLS" in spans[0]["attributes"]["error"]

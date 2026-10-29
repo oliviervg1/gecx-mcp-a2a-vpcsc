@@ -19,7 +19,10 @@ import time
 from typing import Any
 import uuid
 
-from run_phase_a_mcp_and_a2a_baseline import CxasTestClient
+try:
+    from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
+except ImportError:
+    from run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
 
 def run_cmd(cmd: list[str]) -> str:
