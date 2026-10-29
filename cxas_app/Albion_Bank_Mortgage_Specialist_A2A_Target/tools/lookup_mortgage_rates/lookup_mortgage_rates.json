@@ -1,0 +1,10 @@
+{
+  "name": "lookup_mortgage_rates",
+  "displayName": "lookup_mortgage_rates",
+  "executionType": "SYNCHRONOUS",
+  "pythonFunction": {
+    "name": "lookup_mortgage_rates",
+    "pythonCode": "tools/lookup_mortgage_rates/python_function/python_code.py",
+    "description": "Look up Albion Bank fixed mortgage interest rates and the annual penalty-free overpayment allowance."
+  }
+}

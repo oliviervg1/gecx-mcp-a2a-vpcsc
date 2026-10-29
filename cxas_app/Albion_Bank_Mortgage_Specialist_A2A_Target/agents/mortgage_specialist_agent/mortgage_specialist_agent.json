@@ -1,0 +1,22 @@
+{
+  "displayName": "mortgage_specialist_agent",
+  "description": "Answers Albion Bank mortgage rate and annual overpayment allowance questions via lookup_mortgage_rates.",
+  "instruction": "agents/mortgage_specialist_agent/instruction.txt",
+  "childAgents": [],
+  "tools": [
+    "lookup_mortgage_rates",
+    "end_session"
+  ],
+  "beforeModelCallbacks": [
+    {
+      "description": "hide_system_tools",
+      "pythonCode": "agents/mortgage_specialist_agent/before_model_callbacks/hide_system_tools/python_code.py"
+    }
+  ],
+  "afterModelCallbacks": [
+    {
+      "description": "release_line",
+      "pythonCode": "agents/mortgage_specialist_agent/after_model_callbacks/release_line/python_code.py"
+    }
+  ]
+}

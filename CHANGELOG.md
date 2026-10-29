@@ -2,6 +2,15 @@
 
 All notable changes to the Albion Bank CX Agent Studio (GECX) MCP Regional Failover and A2A VPC-SC Verification Suite are documented in this file.
 
+## [0.2.0] - 2026-10-29
+
+### Added — Complete `cxas-scrapi`-Compatible Application Bundles (`cxas_app/`)
+
+- **Why:** Provide complete, `cxas lint`-validated CX Agent Studio application bundles in the standard `cxas-scrapi` format (`app.json`, `global_instruction.txt`, `environment.json`, `agents/`, `tools/`, and `toolsets/`) so engineers can inspect, lint (`cxas lint`), push (`cxas push`), and pull (`cxas pull`) the agents directly alongside the automated REST verification scripts.
+- **Fix:** Added [`cxas_app/Albion_Bank_MCP_Failover/`](cxas_app/Albion_Bank_MCP_Failover/), [`cxas_app/Albion_Bank_Personal_Banking_A2A_Caller/`](cxas_app/Albion_Bank_Personal_Banking_A2A_Caller/), and [`cxas_app/Albion_Bank_Mortgage_Specialist_A2A_Target/`](cxas_app/Albion_Bank_Mortgage_Specialist_A2A_Target/), plus [`cxaslint.yaml`](cxaslint.yaml) and [`cxas_app/README.md`](cxas_app/README.md).
+- **Test:** Verified all three application bundles pass `cxas lint` with 0 errors and 0 warnings, and added [`tests/test_cxas_apps.py`](tests/test_cxas_apps.py) (`17 passed` across `pytest`).
+- **Docs:** Updated [`README.md`](README.md), [`cxas_app/README.md`](cxas_app/README.md), [`docs/README.md`](docs/README.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).
+
 ## [0.1.0] - 2026-10-29
 
 ### Added — MCP Regional Failover Reference Implementation & Verification (`1A`, `1B-i`, `1B-ii`, `1B-iii`)

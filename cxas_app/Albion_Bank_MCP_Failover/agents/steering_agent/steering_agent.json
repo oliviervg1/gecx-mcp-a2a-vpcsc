@@ -1,0 +1,28 @@
+{
+  "displayName": "steering_agent",
+  "description": "Greets the customer and routes identity verification and balance inquiries via route_to_idv.",
+  "instruction": "agents/steering_agent/instruction.txt",
+  "childAgents": [
+    "idv_sub_agent"
+  ],
+  "tools": [
+    "route_to_idv",
+    "end_session"
+  ],
+  "beforeModelCallbacks": [
+    {
+      "description": "session_greeting",
+      "pythonCode": "agents/steering_agent/before_model_callbacks/session_greeting/python_code.py"
+    },
+    {
+      "description": "agent_transfer",
+      "pythonCode": "agents/steering_agent/before_model_callbacks/agent_transfer/python_code.py"
+    }
+  ],
+  "afterModelCallbacks": [
+    {
+      "description": "release_line",
+      "pythonCode": "agents/steering_agent/after_model_callbacks/release_line/python_code.py"
+    }
+  ]
+}

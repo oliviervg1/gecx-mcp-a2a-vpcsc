@@ -1,0 +1,22 @@
+{
+  "displayName": "personal_banking_agent",
+  "description": "Greets the customer and delegates mortgage rate and overpayment questions to the remote Mortgage Specialist CXAS app via RemoteAgentTool.",
+  "instruction": "agents/personal_banking_agent/instruction.txt",
+  "childAgents": [],
+  "tools": [
+    "mortgage_specialist",
+    "end_session"
+  ],
+  "beforeModelCallbacks": [
+    {
+      "description": "session_greeting",
+      "pythonCode": "agents/personal_banking_agent/before_model_callbacks/session_greeting/python_code.py"
+    }
+  ],
+  "afterModelCallbacks": [
+    {
+      "description": "release_line",
+      "pythonCode": "agents/personal_banking_agent/after_model_callbacks/release_line/python_code.py"
+    }
+  ]
+}

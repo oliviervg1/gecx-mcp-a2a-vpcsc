@@ -1,0 +1,10 @@
+{
+  "name": "route_to_idv",
+  "displayName": "route_to_idv",
+  "executionType": "SYNCHRONOUS",
+  "pythonFunction": {
+    "name": "route_to_idv",
+    "pythonCode": "tools/route_to_idv/python_function/python_code.py",
+    "description": "Classify the customer's personal banking request and route identity verification or balance inquiries to the IDV sub-agent."
+  }
+}

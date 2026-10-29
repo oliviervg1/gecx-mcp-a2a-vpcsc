@@ -1,7 +1,7 @@
 # Tool Specification: `verify_customer_identity`
 
-- **Source File:** [`tools/verify_customer_identity/python_function/python_code.py`](../../tools/verify_customer_identity/python_function/python_code.py)
-- **Test Suite:** [`tests/test_verify_customer_identity.py`](../../tests/test_verify_customer_identity.py)
+- **Source Files:** [`tools/verify_customer_identity/python_function/python_code.py`](../../tools/verify_customer_identity/python_function/python_code.py) & [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](../../cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)
+- **Test Suites:** [`tests/test_verify_customer_identity.py`](../../tests/test_verify_customer_identity.py) & [`tests/test_cxas_apps.py`](../../tests/test_cxas_apps.py)
 
 ---
 
@@ -31,8 +31,8 @@ flowchart TD
     CallSecondary --> CheckSecondary{"resp.ok and<br/>status != error?"}
     CheckSecondary -- "Yes" --> SaveSecondary["context.state['idv_status'] = 'VERIFIED'<br/>context.state['idv_region'] = record['region']"]
     SaveSecondary --> ReturnSecondary["Return agent_action:<br/>Verified via secondary failover"]
-    CheckSecondary -- "No" --> SaveUnavailable["context.state['idv_status'] = 'UNAVAILABLE'"]
-    SaveUnavailable --> ReturnFallback["Return agent_action:<br/>Apologize & offer specialist transfer"]
+    CheckSecondary -- "No" --> SaveUnavailable["context.state['idv_status'] = 'UNAVAILABLE'<br/>context.state['call_complete'] = 'true'"]
+    SaveUnavailable --> ReturnFallback["Return agent_action:<br/>Apologize & advise specialist will assist"]
 ```
 
 ---
@@ -60,10 +60,12 @@ def verify_customer_identity(customer_id: str = "") -> dict[str, str]:
 | :--- | :--- | :--- |
 | `context.state["idv_status"]` | `"VERIFIED"` \| `"UNAVAILABLE"` | Set to `"VERIFIED"` when either primary or secondary MCP verification succeeds; set to `"UNAVAILABLE"` when both endpoints fail. |
 | `context.state["idv_region"]` | `"europe-west2-primary"` \| `"europe-west1-secondary"` | Set to the `region` field returned by whichever regional MCP server completed the verification. |
+| `context.state["escalation_reason"]` | `"IDV_REGIONS_UNAVAILABLE"` \| `"IDV_SYSTEM_ERROR"` | Set when both regional MCP endpoints fail or an unexpected exception occurs. |
+| `context.state["call_complete"]` | `"true"` | Set when both regional MCP endpoints fail so the `release_line` `after_model_callback` appends `Part.from_end_session`. |
 
 ### Helper Functions
 
-- **[`_call_regional_mcp(mcp_tool_fn, customer_id)`](../../tools/verify_customer_identity/python_function/python_code.py#L66-L74)**: Invokes the provided regional MCP tool callable (`tools.customer_idv_primary_verify_customer` or `tools.customer_idv_secondary_verify_customer`), validates the response with `_is_mcp_call_successful(resp)`, unwraps the payload via `_extract_verification_record(resp)`, and verifies `"region" in record`.
-- **[`_is_mcp_call_successful(resp)`](../../tools/verify_customer_identity/python_function/python_code.py#L77-L86)**: Returns `False` if `not resp.ok`, `not resp.text`, or `resp.json().get("status") == "error"`.
-- **[`_extract_verification_record(resp)`](../../tools/verify_customer_identity/python_function/python_code.py#L89-L92)**: Extracts the parsed `body["text_output"][0]` dictionary from the CXAS FastMCP response envelope.
-- **[`_format_verified_action(customer_id, record, failed_over)`](../../tools/verify_customer_identity/python_function/python_code.py#L95-L108)**: Produces the `{"agent_action": ...}` dictionary indicating whether verification completed via the primary regional endpoint or secondary regional failover.
+- **[`_call_regional_mcp(mcp_tool_fn, customer_id)`](../../tools/verify_customer_identity/python_function/python_code.py#L74-L82)**: Invokes the provided regional MCP tool callable (`tools.customer_idv_primary_verify_customer` or `tools.customer_idv_secondary_verify_customer`), validates the response with `_is_mcp_call_successful(resp)`, unwraps the payload via `_extract_verification_record(resp)`, and verifies `"region" in record`.
+- **[`_is_mcp_call_successful(resp)`](../../tools/verify_customer_identity/python_function/python_code.py#L85-L94)**: Returns `False` if `not resp.ok`, `not resp.text`, or `resp.json().get("status") == "error"`.
+- **[`_extract_verification_record(resp)`](../../tools/verify_customer_identity/python_function/python_code.py#L97-L103)**: Safely extracts the parsed `text_output[0]` dictionary from the CXAS FastMCP response envelope (returning `{}` if `text_output` is absent so `_call_regional_mcp` fails over cleanly).
+- **[`_format_verified_action(customer_id, record, failed_over)`](../../tools/verify_customer_identity/python_function/python_code.py#L106-L119)**: Produces the `{"agent_action": ...}` dictionary indicating whether verification completed via the primary regional endpoint or secondary regional failover.

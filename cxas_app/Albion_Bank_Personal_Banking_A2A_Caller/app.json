@@ -1,0 +1,73 @@
+{
+  "name": "Albion_Bank_Personal_Banking_A2A_Caller",
+  "displayName": "Albion_Bank_Personal_Banking_A2A_Caller",
+  "description": "Albion Bank personal banking A2A caller application delegating mortgage inquiries to the remote Mortgage Specialist CXAS app via RemoteAgentTool.",
+  "rootAgent": "personal_banking_agent",
+  "globalInstruction": "global_instruction.txt",
+  "modelSettings": {
+    "model": "gemini-composite-v2",
+    "temperature": 0.0
+  },
+  "toolExecutionMode": "SEQUENTIAL",
+  "timeZoneSettings": {
+    "timeZone": "Europe/London"
+  },
+  "languageSettings": {
+    "defaultLanguageCode": "en-GB",
+    "supportedLanguageCodes": [
+      "en-GB"
+    ]
+  },
+  "audioProcessingConfig": {
+    "bargeInConfig": {
+      "bargeInAwareness": true
+    },
+    "inactivityTimeout": "10s",
+    "synthesizeSpeechConfigs": {
+      "en-GB": {
+        "voice": "en-GB-Chirp3-HD-Aoede",
+        "speakingRate": 1.0,
+        "instruction": "Friendly woman in her early 30s, warm mid-pitch voice, British accent, clear conversational pace"
+      }
+    }
+  },
+  "loggingSettings": {
+    "cloudLoggingSettings": {
+      "enableCloudLogging": true
+    }
+  },
+  "variableDeclarations": [
+    {
+      "name": "session_greeted",
+      "description": "True once the opening deterministic greeting has been delivered.",
+      "schema": {
+        "type": "BOOLEAN",
+        "required": []
+      }
+    },
+    {
+      "name": "call_complete",
+      "description": "Lifecycle flag set to 'true' when the call should end and 'released' once Part.from_end_session is emitted.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    },
+    {
+      "name": "escalation_reason",
+      "description": "Structured escalation or completion reason code.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    },
+    {
+      "name": "last_agent_action",
+      "description": "Last spoken prompt or guidance returned to the customer.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    }
+  ]
+}
