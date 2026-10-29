@@ -256,7 +256,7 @@ def run_phase_b(
     client.push_app_bundle(
         app_id=caller_app_id,
         bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
-        replacements={"MORTGAGE_SPECIALIST_APP_ID": mortgage_app_id},
+        replacements={"apps/mortgage-specialist-app": f"apps/{mortgage_app_id}"},
         custom_sa=None,
     )
 
@@ -300,7 +300,7 @@ def run_phase_b(
     client.push_app_bundle(
         app_id=caller_app_id,
         bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
-        replacements={"MORTGAGE_SPECIALIST_APP_ID": mortgage_app_id},
+        replacements={"apps/mortgage-specialist-app": f"apps/{mortgage_app_id}"},
         custom_sa=custom_sa,
     )
     update_perimeter(

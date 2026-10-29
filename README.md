@@ -74,8 +74,8 @@ done
 
 ### Prerequisites
 
-1. Python `>=3.12` and [`uv`](https://docs.astral.sh/uv/) installed locally.
-2. Google Cloud SDK (`gcloud`) with the `beta` component installed (`gcloud components install beta`) and an authenticated session (`gcloud auth login`).
+1. Python `>=3.11` and [`uv`](https://docs.astral.sh/uv/) installed locally.
+2. Google Cloud SDK (`gcloud`) with the `beta` component installed (`gcloud components install beta`), an authenticated CLI session (`gcloud auth login`), and Application Default Credentials configured (`gcloud auth application-default login`) for `cxas-scrapi`.
 3. A dedicated Google Cloud test project (for example, `albion-gcp-project`) with billing enabled where you have permissions to enable APIs, deploy Cloud Run services, manage IAM bindings, and create CX Agent Studio applications.
 4. If running Phase B (VPC Service Controls A2A verification), an Organization Access Policy ID (`POLICY_ID`) and the Access Context Manager Admin role (`roles/accesscontextmanager.policyAdmin`) at the organization level.
 

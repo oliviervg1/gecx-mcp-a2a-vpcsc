@@ -57,8 +57,11 @@ if [[ "${DELETE_PROJECT}" == "true" ]]; then
   exit 0
 fi
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "2. Deleting test CXAS applications and resetting SecuritySettings via cxas-scrapi in ${PROJECT_ID} (${LOCATION})..."
-uv run python - "${PROJECT_ID}" "${LOCATION}" <<'PY'
+(
+  cd "${REPO_ROOT}"
+  uv run python - "${PROJECT_ID}" "${LOCATION}" <<'PY'
 import sys
 from google.api_core import exceptions as google_exceptions
 from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
@@ -69,7 +72,8 @@ client = CxasTestClient(project_id=project_id, location=location)
 for app_id in ("scenario1-mcp-repro", "personal-banking-a2a-caller", "mortgage-specialist-app"):
     app_name = client.app_resource_name(app_id)
     try:
-        client.apps.delete_app(app_name=app_name, force=True)
+        op = client.apps.client.delete_app(name=app_name)
+        op.result()
         print(f"Deleted CXAS app: {app_name}")
     except google_exceptions.NotFound:
         pass
@@ -82,6 +86,7 @@ try:
 except Exception as exc:
     print(f"Warning resetting SecuritySettings: {exc}")
 PY
+)
 
 echo "3. Deleting Cloud Run service ${SERVICE_NAME} in ${REGION}..."
 gcloud run services delete "${SERVICE_NAME}" \

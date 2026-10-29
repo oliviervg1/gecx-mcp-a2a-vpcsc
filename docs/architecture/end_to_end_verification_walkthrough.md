@@ -1,6 +1,6 @@
 # End-to-End Verification Walkthrough — Live Test Matrix (`1A` through `2C`)
 
-This document walks through the 10 verification tests in [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](../../scripts/run_phase_a_mcp_and_a2a_baseline.py) and [`scripts/run_phase_b_vpcsc_a2a.py`](../../scripts/run_phase_b_vpcsc_a2a.py) using de-identified outputs from an isolated Google Cloud project (`albion-gcp-project`, project number `123456789012`, organization `111222333444`, access policy `987654321098`) protected by an enforced VPC Service Controls perimeter (`albion_a2a_repro_perimeter`).
+This document walks through the 10 verification tests in [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](../../scripts/run_phase_a_mcp_and_a2a_baseline.py) and [`scripts/run_phase_b_vpcsc_a2a.py`](../../scripts/run_phase_b_vpcsc_a2a.py) using de-identified empirical outputs captured in an isolated Google Cloud project (`albion-gcp-project`, project number `123456789012`, organization `111222333444`, access policy `987654321098`) protected by an enforced VPC Service Controls perimeter (`albion_a2a_repro_perimeter`). *(Note: The empirical cloud traces below were captured during the v0.2.0 live verification run; the v0.3.0 `cxas-scrapi` orchestration refactor in `scripts/` is verified via offline unit tests in `pytest` and ready for live cloud re-execution.)*
 
 ---
 

@@ -368,14 +368,15 @@ def test_lookup_mortgage_rates_and_toolset_fakes(monkeypatch: pytest.MonkeyPatch
 def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verifies CxasTestClient.push_app_bundle substitutes placeholders and calls Apps.import_app."""
+    """Verifies CxasTestClient.push_app_bundle, resource resolution, and custom SA patching."""
     captured_zip_entries: dict[str, str] = {}
+    patched_requests: list[tuple[str, dict[str, Any]]] = []
 
     class FakeApps:
-        def __init__(self, project_id: str, location: str) -> None:
+        def __init__(self, project_id: str, location: str, creds: Any = None) -> None:
             self.project_id = project_id
             self.location = location
-            self.creds = "fake-creds"
+            self.creds = creds or "fake-creds"
 
         def get_app(self, app_name: str) -> SimpleNamespace:
             return SimpleNamespace(name=app_name)
@@ -387,42 +388,116 @@ def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
             conflict_strategy: str,
         ) -> SimpleNamespace:
             assert conflict_strategy == "OVERWRITE"
+            captured_zip_entries.clear()
             with zipfile.ZipFile(local_path) as zf:
                 for member in zf.namelist():
                     if member.endswith(".json"):
                         captured_zip_entries[member] = zf.read(member).decode("utf-8")
-            return SimpleNamespace(result=lambda: SimpleNamespace(name=app_name))
+            return SimpleNamespace(
+                result=lambda: SimpleNamespace(name=app_name, warnings=[])
+            )
+
+    class FakeTools:
+        def __init__(self, app_name: str, creds: Any = None) -> None:
+            self.app_name = app_name
+
+        def list_tools(self) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(
+                    name=f"{self.app_name}/tools/uuid-mortgage-123",
+                    display_name="mortgage_specialist",
+                    system_tool=None,
+                ),
+                SimpleNamespace(
+                    name=f"{self.app_name}/tools/uuid-verify-456",
+                    display_name="verify_customer_identity",
+                    system_tool=None,
+                ),
+                SimpleNamespace(
+                    name=f"{self.app_name}/tools/uuid-end-789",
+                    display_name="end_session",
+                    system_tool=SimpleNamespace(name="end_session"),
+                ),
+                SimpleNamespace(
+                    name=f"{self.app_name}/toolsets/uuid-primary-111",
+                    display_name="customer_idv_primary",
+                    system_tool=None,
+                ),
+            ]
+
+    class FakeAuthorizedSession:
+        def __init__(self, creds: Any) -> None:
+            self.creds = creds
+            self._stored_sa = ""
+
+        def get(self, url: str, headers: dict[str, str], timeout: int) -> SimpleNamespace:
+            body: dict[str, Any] = {"remoteAgentTool": {"name": "mortgage_specialist"}}
+            if self._stored_sa:
+                body["remoteAgentTool"]["apiAuthentication"] = {
+                    "serviceAccountAuthConfig": {"serviceAccount": self._stored_sa}
+                }
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+
+        def patch(
+            self,
+            url: str,
+            headers: dict[str, str],
+            json: dict[str, Any],
+            timeout: int,
+        ) -> SimpleNamespace:
+            patched_requests.append((url, json))
+            self._stored_sa = (
+                json["remoteAgentTool"]["apiAuthentication"]["serviceAccountAuthConfig"][
+                    "serviceAccount"
+                ]
+            )
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: json)
 
     monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Apps", FakeApps)
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Tools", FakeTools)
+    monkeypatch.setattr(
+        "scripts.run_phase_a_mcp_and_a2a_baseline.AuthorizedSession",
+        FakeAuthorizedSession,
+    )
     client = CxasTestClient(project_id="albion-test-proj", location="eu")
 
-    # 1. Push A2A Caller bundle without custom_sa (default CXAS service agent)
+    # 1. Push MCP Failover bundle and verify toolFakeConfig.enableFakeMode is disabled for live runs
+    client.push_app_bundle(
+        app_id="scenario1-mcp-repro",
+        bundle_name="Albion_Bank_MCP_Failover",
+        replacements={
+            "https://YOUR_PRIMARY_MCP_URL": "https://mcp.example.run.app",
+            "https://YOUR_SECONDARY_MCP_URL": "https://mcp.example.run.app",
+        },
+    )
+    primary_ts = json.loads(
+        captured_zip_entries["agent/toolsets/customer_idv_primary/customer_idv_primary.json"]
+    )
+    assert primary_ts["mcpToolset"]["serverAddress"] == "https://mcp.example.run.app/mcp1/"
+    assert primary_ts["toolFakeConfig"]["enableFakeMode"] is False
+
+    # 2. Push A2A Caller bundle with a non-default target app ID and custom_sa
     client.push_app_bundle(
         app_id="personal-banking-a2a-caller",
         bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
-        replacements={"MORTGAGE_SPECIALIST_APP_ID": "mortgage-specialist-app"},
-        custom_sa=None,
+        replacements={"apps/mortgage-specialist-app": "apps/custom-mortgage-target"},
+        custom_sa="a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com",
     )
     a2a_json = json.loads(
         captured_zip_entries["agent/tools/mortgage_specialist/mortgage_specialist.json"]
     )
     url = a2a_json["remoteAgentTool"]["agentCard"]["supportedInterfaces"][0]["url"]
-    assert "projects/albion-test-proj/locations/eu/apps/mortgage-specialist-app" in url
+    assert "projects/albion-test-proj/locations/eu/apps/custom-mortgage-target" in url
     assert "apiAuthentication" not in a2a_json["remoteAgentTool"]
-
-    # 2. Push A2A Caller bundle with custom_sa
-    client.push_app_bundle(
-        app_id="personal-banking-a2a-caller",
-        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
-        replacements={"MORTGAGE_SPECIALIST_APP_ID": "mortgage-specialist-app"},
-        custom_sa="a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com",
-    )
-    a2a_json_sa = json.loads(
-        captured_zip_entries["agent/tools/mortgage_specialist/mortgage_specialist.json"]
+    assert len(patched_requests) == 1
+    assert "tools/uuid-mortgage-123?updateMask=remoteAgentTool" in patched_requests[0][0]
+    assert (
+        patched_requests[0][1]["remoteAgentTool"]["apiAuthentication"][
+            "serviceAccountAuthConfig"
+        ]["serviceAccount"]
+        == "a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com"
     )
     assert (
-        a2a_json_sa["remoteAgentTool"]["apiAuthentication"]["serviceAccountAuthConfig"][
-            "serviceAccount"
-        ]
-        == "a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com"
+        client.resolve_toolset_name("scenario1-mcp-repro", "customer_idv_primary")
+        == "projects/albion-test-proj/locations/eu/apps/scenario1-mcp-repro/toolsets/uuid-primary-111"
     )

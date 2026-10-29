@@ -14,6 +14,7 @@ import argparse
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import time
 from typing import Any, Literal
@@ -24,6 +25,8 @@ from cxas_scrapi.core.apps import Apps
 from cxas_scrapi.core.sessions import Sessions
 from cxas_scrapi.core.tools import Tools
 from google.api_core import exceptions as google_exceptions
+from google.auth import credentials as auth_credentials
+from google.auth.transport.requests import AuthorizedSession
 from google.cloud.ces_v1beta import types
 from google.protobuf import field_mask_pb2
 from google.protobuf.json_format import MessageToDict
@@ -51,6 +54,20 @@ MCP_TOOL_OVERRIDES = [
 ]
 
 
+class GcloudAccountCredentials(auth_credentials.Credentials):
+    """Refreshes OAuth 2.0 bearer tokens from gcloud for an explicit --account."""
+
+    def __init__(self, account: str, quota_project_id: str) -> None:
+        super().__init__()
+        self.account = account
+        self._quota_project_id = quota_project_id
+        self.refresh(None)
+
+    def refresh(self, request: Any) -> None:
+        cmd = ["gcloud", "auth", "print-access-token", f"--account={self.account}"]
+        self.token = subprocess.check_output(cmd, text=True).strip()
+
+
 class CxasTestClient:
     """cxas-scrapi client wrapper for provisioning, mutating, and testing CXAS applications."""
 
@@ -59,7 +76,8 @@ class CxasTestClient:
         self.location = location
         self.account = account
         self.parent = f"projects/{project_id}/locations/{location}"
-        self.apps = Apps(project_id=project_id, location=location)
+        creds = GcloudAccountCredentials(account, project_id) if account else None
+        self.apps = Apps(project_id=project_id, location=location, creds=creds)
 
     def app_resource_name(self, app_id: str) -> str:
         """Returns the full CXAS resource name for an application ID."""
@@ -78,6 +96,79 @@ class CxasTestClient:
                 time_zone_settings=types.TimeZoneSettings(time_zone="Europe/London"),
             )
             return app.name
+
+    def resolve_agent_name(self, app_id: str, display_name: str) -> str:
+        """Resolves an agent display name to its server-assigned full resource name."""
+        app_name = self.app_resource_name(app_id)
+        agents_client = Agents(app_name=app_name, creds=self.apps.creds)
+        agents_map = agents_client.get_agents_map(reverse=True)
+        if display_name not in agents_map:
+            raise KeyError(f"Agent '{display_name}' not found in {app_name}: {list(agents_map)}")
+        return agents_map[display_name]
+
+    def resolve_tool_name(self, app_id: str, display_name: str) -> str:
+        """Resolves a tool display name (or system tool name) to its full resource name."""
+        app_name = self.app_resource_name(app_id)
+        tools_client = Tools(app_name=app_name, creds=self.apps.creds)
+        for item in tools_client.list_tools():
+            if "/tools/" not in item.name:
+                continue
+            sys_name = getattr(getattr(item, "system_tool", None), "name", "")
+            if item.display_name == display_name or sys_name == display_name:
+                return item.name
+        raise KeyError(f"Tool '{display_name}' not found in {app_name}")
+
+    def resolve_toolset_name(self, app_id: str, display_name: str) -> str | None:
+        """Resolves a toolset display name to its full resource name without calling retrieve_tools."""
+        app_name = self.app_resource_name(app_id)
+        tools_client = Tools(app_name=app_name, creds=self.apps.creds)
+        for item in tools_client.list_tools():
+            if "/toolsets/" in item.name and item.display_name == display_name:
+                return item.name
+        return None
+
+    def set_remote_agent_custom_sa(
+        self,
+        app_id: str,
+        tool_display_name: str,
+        custom_sa: str,
+    ) -> dict[str, Any]:
+        """Applies serviceAccountAuthConfig on a RemoteAgentTool via AuthorizedSession and verifies persistence."""
+        tool_name = self.resolve_tool_name(app_id, tool_display_name)
+        url = f"https://ces.googleapis.com/v1beta/{tool_name}"
+        authed_session = AuthorizedSession(self.apps.creds)
+        headers = {"x-goog-user-project": self.project_id}
+
+        get_resp = authed_session.get(url, headers=headers, timeout=60)
+        get_resp.raise_for_status()
+        current_tool = get_resp.json()
+        remote_tool = current_tool.get("remoteAgentTool", {})
+        remote_tool["apiAuthentication"] = {
+            "serviceAccountAuthConfig": {"serviceAccount": custom_sa}
+        }
+
+        patch_resp = authed_session.patch(
+            f"{url}?updateMask=remoteAgentTool",
+            headers=headers,
+            json={"remoteAgentTool": remote_tool},
+            timeout=60,
+        )
+        patch_resp.raise_for_status()
+
+        verify_resp = authed_session.get(url, headers=headers, timeout=60)
+        verify_resp.raise_for_status()
+        verified = verify_resp.json()
+        persisted_sa = (
+            verified.get("remoteAgentTool", {})
+            .get("apiAuthentication", {})
+            .get("serviceAccountAuthConfig", {})
+            .get("serviceAccount")
+        )
+        if persisted_sa != custom_sa:
+            raise RuntimeError(
+                f"Expected custom Service Account '{custom_sa}' on {tool_name}, got '{persisted_sa}'"
+            )
+        return verified
 
     def push_app_bundle(
         self,
@@ -108,20 +199,16 @@ class CxasTestClient:
                     text = text.replace(old, new)
                 json_file.write_text(text, encoding="utf-8")
 
-            # For the A2A caller bundle, configure or omit custom Service Account authentication.
-            a2a_tool_json = (
-                staged_dir / "tools" / "mortgage_specialist" / "mortgage_specialist.json"
-            )
-            if a2a_tool_json.exists():
-                payload = json.loads(a2a_tool_json.read_text(encoding="utf-8"))
-                remote_tool = payload.get("remoteAgentTool", {})
-                if custom_sa:
-                    remote_tool["apiAuthentication"] = {
-                        "serviceAccountAuthConfig": {"serviceAccount": custom_sa}
-                    }
-                else:
-                    remote_tool.pop("apiAuthentication", None)
-                a2a_tool_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            # Disable toolFakeConfig.enableFakeMode when staging MCP toolsets for live Cloud Run verification.
+            toolsets_dir = staged_dir / "toolsets"
+            if toolsets_dir.exists():
+                for ts_json in toolsets_dir.rglob("*.json"):
+                    ts_payload = json.loads(ts_json.read_text(encoding="utf-8"))
+                    if "toolFakeConfig" in ts_payload:
+                        ts_payload["toolFakeConfig"]["enableFakeMode"] = False
+                        ts_json.write_text(
+                            json.dumps(ts_payload, indent=2) + "\n", encoding="utf-8"
+                        )
 
             archive_base = str(Path(tmp_root) / "bundle")
             zip_path = shutil.make_archive(archive_base, "zip", root_dir=tmp_root, base_dir="agent")
@@ -130,7 +217,15 @@ class CxasTestClient:
                 local_path=zip_path,
                 conflict_strategy="OVERWRITE",
             )
-            lro.result()
+            import_resp = lro.result()
+            warnings = list(getattr(import_resp, "warnings", []) or [])
+            if warnings:
+                raise RuntimeError(
+                    f"ImportApp reported validation warnings for {bundle_name}: {warnings}"
+                )
+
+        if custom_sa:
+            self.set_remote_agent_custom_sa(app_id, "mortgage_specialist", custom_sa)
         return app_name
 
     def upsert_mcp_toolset(
@@ -143,7 +238,7 @@ class CxasTestClient:
         """Creates or updates an MCP toolset resource via cxas-scrapi Tools."""
         app_name = self.app_resource_name(app_id)
         tools_client = Tools(app_name=app_name, creds=self.apps.creds)
-        toolset_name = f"{app_name}/toolsets/{toolset_id}"
+        existing_name = self.resolve_toolset_name(app_id, toolset_id)
 
         mcp_dict: dict[str, Any] = {
             "serverAddress": server_address,
@@ -153,20 +248,19 @@ class CxasTestClient:
             mcp_dict["toolOverrides"] = MCP_TOOL_OVERRIDES
 
         mcp_proto = types.McpToolset.from_json(json.dumps(mcp_dict))
-        try:
-            tools_client.get_tool(toolset_name)
+        if existing_name:
             return tools_client.update_tool(
-                toolset_name,
+                existing_name,
                 display_name=toolset_id,
                 mcp_toolset=mcp_proto,
+                tool_fake_config=types.ToolFakeConfig(enable_fake_mode=False),
             )
-        except google_exceptions.NotFound:
-            return tools_client.create_tool(
-                tool_id=toolset_id,
-                display_name=toolset_id,
-                payload=mcp_dict,
-                tool_type="mcp_toolset",
-            )
+        return tools_client.create_tool(
+            tool_id=toolset_id,
+            display_name=toolset_id,
+            payload=mcp_dict,
+            tool_type="mcp_toolset",
+        )
 
     def configure_idv_agent_mode(
         self,
@@ -177,26 +271,29 @@ class CxasTestClient:
         """Switches idv_sub_agent between direct MCP attachment (Test 1A) and Python controller (Tests 1B)."""
         app_name = self.app_resource_name(app_id)
         agents_client = Agents(app_name=app_name, creds=self.apps.creds)
-        agent_name = f"{app_name}/agents/idv_sub_agent"
+        agent_name = self.resolve_agent_name(app_id, "idv_sub_agent")
 
         if mode == "direct_mcp":
+            toolset_name = self.resolve_toolset_name(app_id, direct_toolset_id)
+            if not toolset_name:
+                raise KeyError(f"Toolset '{direct_toolset_id}' not found in {app_name}")
             return agents_client.update_agent(
                 agent_name,
                 toolsets=[
                     types.Agent.AgentToolset(
-                        toolset=f"{app_name}/toolsets/{direct_toolset_id}",
+                        toolset=toolset_name,
                         tool_ids=["verify_customer"],
                     )
                 ],
                 tools=[],
             )
+
+        verify_tool_name = self.resolve_tool_name(app_id, "verify_customer_identity")
+        end_session_name = self.resolve_tool_name(app_id, "end_session")
         return agents_client.update_agent(
             agent_name,
             toolsets=[],
-            tools=[
-                f"{app_name}/tools/verify_customer_identity",
-                "end_session",
-            ],
+            tools=[verify_tool_name, end_session_name],
         )
 
     def update_security_settings(self, allowed_origins: list[str]) -> types.SecuritySettings:
@@ -229,8 +326,13 @@ class CxasTestClient:
         )
         try:
             resp = sessions_client.run(session_id=session_id, text=text, modality="text")
-            raw_dict = MessageToDict(resp._original_response._pb)
-            raw_dict["structured"] = sessions_client.get_structured_response(resp)
+            outputs_list = [
+                types.SessionOutput.to_dict(out) for out in getattr(resp, "outputs", [])
+            ]
+            raw_dict: dict[str, Any] = {
+                "outputs": outputs_list,
+                "structured": sessions_client.get_structured_response(resp),
+            }
             return 200, raw_dict, session_id
         except google_exceptions.GoogleAPICallError as err:
             status_code = int(err.code) if err.code else 400
@@ -380,7 +482,7 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
     client.push_app_bundle(
         app_id=caller_app_id,
         bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
-        replacements={"MORTGAGE_SPECIALIST_APP_ID": mortgage_app_id},
+        replacements={"apps/mortgage-specialist-app": f"apps/{mortgage_app_id}"},
         custom_sa=None,
     )
 
