@@ -1,0 +1,65 @@
+{
+  "name": "Albion_Bank_Mortgage_Specialist_A2A_Target",
+  "displayName": "Albion_Bank_Mortgage_Specialist_A2A_Target",
+  "description": "Albion Bank Mortgage Specialist A2A target application answering mortgage rate and annual overpayment allowance questions.",
+  "rootAgent": "mortgage_specialist_agent",
+  "globalInstruction": "global_instruction.txt",
+  "modelSettings": {
+    "model": "gemini-composite-v2",
+    "temperature": 0.0
+  },
+  "toolExecutionMode": "SEQUENTIAL",
+  "timeZoneSettings": {
+    "timeZone": "Europe/London"
+  },
+  "languageSettings": {
+    "defaultLanguageCode": "en-GB",
+    "supportedLanguageCodes": [
+      "en-GB"
+    ]
+  },
+  "audioProcessingConfig": {
+    "bargeInConfig": {
+      "bargeInAwareness": true
+    },
+    "inactivityTimeout": "10s",
+    "synthesizeSpeechConfigs": {
+      "en-GB": {
+        "voice": "en-GB-Chirp3-HD-Aoede",
+        "speakingRate": 1.0,
+        "instruction": "Friendly woman in her early 30s, warm mid-pitch voice, British accent, clear conversational pace"
+      }
+    }
+  },
+  "loggingSettings": {
+    "cloudLoggingSettings": {
+      "enableCloudLogging": true
+    }
+  },
+  "variableDeclarations": [
+    {
+      "name": "call_complete",
+      "description": "Lifecycle flag set to 'true' when the call should end and 'released' once Part.from_end_session is emitted.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    },
+    {
+      "name": "escalation_reason",
+      "description": "Structured escalation or completion reason code.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    },
+    {
+      "name": "last_agent_action",
+      "description": "Last spoken prompt or guidance returned to the caller.",
+      "schema": {
+        "type": "STRING",
+        "required": []
+      }
+    }
+  ]
+}

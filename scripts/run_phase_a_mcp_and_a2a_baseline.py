@@ -111,6 +111,16 @@ class CxasTestClient:
                         "description": "Region that fulfilled customer verification.",
                         "schema": {"type": "STRING"},
                     },
+                    {
+                        "name": "escalation_reason",
+                        "description": "Structured escalation or completion reason code.",
+                        "schema": {"type": "STRING"},
+                    },
+                    {
+                        "name": "call_complete",
+                        "description": "Lifecycle flag set when the call should end.",
+                        "schema": {"type": "STRING"},
+                    },
                 ],
             },
         )

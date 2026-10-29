@@ -1,0 +1,31 @@
+{
+  "name": "mortgage_specialist",
+  "displayName": "mortgage_specialist",
+  "executionType": "SYNCHRONOUS",
+  "remoteAgentTool": {
+    "name": "mortgage_specialist",
+    "description": "Delegates mortgage rate and overpayment questions to the remote Mortgage Specialist CXAS app over A2A.",
+    "agentCard": {
+      "name": "mortgage_specialist",
+      "description": "Answers Albion Bank mortgage rate and annual overpayment allowance inquiries.",
+      "version": "1.0.0",
+      "supportedInterfaces": [
+        {
+          "url": "https://ces.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/eu/apps/mortgage-specialist-app",
+          "protocolBinding": "HTTP+JSON",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "skills": [
+        {
+          "id": "mortgage_rates",
+          "name": "mortgage_rates",
+          "description": "Mortgage interest rates and penalty-free overpayment rules.",
+          "tags": [
+            "mortgage"
+          ]
+        }
+      ]
+    }
+  }
+}

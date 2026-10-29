@@ -2,7 +2,7 @@
 
 > **Disclaimer:** This repository is an unofficial reference implementation and is not an officially supported Google product. "Albion Bank" (`albion-gcp-project`) is a fictional institution used strictly for illustration.
 
-This repository provides a complete, customer-reproducible reference implementation and live verification suite for two enterprise integration patterns in CX Agent Studio (GECX):
+This repository provides a complete, customer-reproducible reference implementation, **`cxas-scrapi`-compatible CX Agent Studio application bundles (`cxas_app/`)**, and a live verification suite for two enterprise integration patterns in CX Agent Studio (GECX):
 
 1. **Model Context Protocol (MCP) Session Initialization, Error Interception, and Regional Failover:** Reproduces the unhandled HTTP 400 `FAILED_PRECONDITION` crash that occurs when an MCP toolset is attached directly to a sub-agent and its primary endpoint fails during session initialization. Demonstrates how invoking the MCP toolsets from a Python Function Tool controller (`verify_customer_identity`) — with the MCP toolsets omitted from the sub-agent's `toolsets` list and configured with `toolOverrides` schema snapshots where supported — eliminates entry-time network calls and automatically fails over from an unhealthy primary route (`/mcp1`, simulating `europe-west2`) to a healthy secondary route (`/mcp2`, simulating `europe-west1`).
 2. **Agent-to-Agent (A2A) Protocol Connectivity Under VPC Service Controls (VPC-SC):** Reproduces and resolves the `PERMISSION_DENIED` (`VPC_SERVICE_CONTROLS` / `RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER`) error when a calling CXAS application invokes a remote CXAS application over the native A2A protocol inside an enforced VPC-SC service perimeter, covering outbound `allowedOrigins`, perimeter `egressPolicies` (`resources: ["*"]`) and `ingressPolicies`, and custom Service Account IAM alignment.
@@ -31,21 +31,27 @@ Customer Utterance ("Verify my identity for customer ID CUST-101")
 
 ---
 
-## Quickstart (2 Minutes — Offline Unit Tests, No GCP Project Required)
+## Quickstart (2 Minutes — Offline Unit Tests & `cxas lint`, No GCP Project Required)
 
-You can run the full offline unit test suite locally to verify the Python Function Tool failover controller and the dual-route FastMCP test server without deploying any cloud resources:
+You can run the full offline unit test suite locally to verify the three `cxas-scrapi` application bundles under [`cxas_app/`](cxas_app/), the Python Function Tool controllers and callbacks, and the dual-route FastMCP test server without deploying any cloud resources:
 
 ```bash
 uv sync --extra dev
 uv run pytest -v
 ```
 
-The offline test suite (`9 passed`) verifies:
-- Primary MCP endpoint success when `/mcp1` is healthy (`idv_status = "VERIFIED"`, `idv_region = "europe-west2-primary"`).
-- Automatic regional failover to `/mcp2` when `/mcp1` returns either an HTTP 400 transport error (`resp.ok == False`) or a call-time MCP protocol error envelope (`body.get("status") == "error"`), setting `idv_status = "VERIFIED"` and `idv_region = "europe-west1-secondary"`.
-- Graceful degradation when both primary and secondary MCP endpoints are unreachable (`idv_status = "UNAVAILABLE"`).
-- Missing customer ID prompting before any MCP network call is attempted.
-- Dual-route FastMCP ASGI application routing (`/healthz` returning `200`, `/mcp1` returning `400 Bad Request`, and `/mcp2` serving both `initialize` and `tools/call` for `verify_customer`).
+The offline test suite (`17 passed`) verifies:
+- **`cxas-scrapi` Application Structure & Schema Invariants (`tests/test_cxas_apps.py`):** Validates `app.json`, `global_instruction.txt`, `environment.json`, single-parent `childAgents` trees, agent `instruction.txt` XML structure (`<role>`, `<persona>`, `<constraints>`, `<taskflow>`, `<examples>`), silent `before_model_callback` sub-agent transfers (`Part.from_agent_transfer`), `lookup_mortgage_rates`, and deterministic `toolFakeConfig` blocks across all three CXAS apps.
+- **Primary & Secondary MCP Failover (`tests/test_verify_customer_identity.py`):** Verifies primary `/mcp1` success (`idv_status = "VERIFIED"`, `idv_region = "europe-west2-primary"`), automatic failover to `/mcp2` on both Stage 1 HTTP 400 transport errors (`resp.ok == False`) and Stage 2 call-time MCP error envelopes (`body.get("status") == "error"`), missing customer ID prompting, and graceful specialist fallback when both regions fail (`idv_status = "UNAVAILABLE"`).
+- **Dual-Route FastMCP ASGI Server (`tests/test_mcp_server.py`):** Verifies `/healthz` (`200`), `/mcp1` (`400 Bad Request`), and `/mcp2` (`initialize` and `tools/call` for `verify_customer`).
+
+If you have [`cxas-scrapi`](https://github.com/GoogleCloudPlatform/cxas-scrapi) installed, you can also run `cxas lint` across all three application bundles:
+
+```bash
+for app in Albion_Bank_MCP_Failover Albion_Bank_Personal_Banking_A2A_Caller Albion_Bank_Mortgage_Specialist_A2A_Target; do
+  cxas lint --app-dir "cxas_app/${app}"
+done
+```
 
 ---
 
@@ -53,8 +59,9 @@ The offline test suite (`9 passed`) verifies:
 
 | Component | Path | Purpose |
 | :--- | :--- | :--- |
+| **`cxas-scrapi` Application Bundles** | [`cxas_app/`](cxas_app/) | Complete, `cxas lint`-clean CX Agent Studio application bundles (`Albion_Bank_MCP_Failover`, `Albion_Bank_Personal_Banking_A2A_Caller`, and `Albion_Bank_Mortgage_Specialist_A2A_Target`) ready for `cxas push` / `cxas pull`. See [`cxas_app/README.md`](cxas_app/README.md). |
 | **Dual-Route FastMCP Server** | [`mcp_server/main.py`](mcp_server/main.py) | Containerized Python server exposing `/mcp1` (simulates a broken regional proxy returning HTTP 400) and `/mcp2` (healthy FastMCP Streamable HTTP endpoint serving `verify_customer`). |
-| **Python Failover Controller** | [`tools/verify_customer_identity/python_function/python_code.py`](tools/verify_customer_identity/python_function/python_code.py) | Production CXAS Python Function Tool that intercepts both HTTP transport failures and call-time MCP errors, failing over from `customer_idv_primary` to `customer_idv_secondary`. |
+| **Python Failover Controller** | [`tools/verify_customer_identity/python_function/python_code.py`](tools/verify_customer_identity/python_function/python_code.py) | Production CXAS Python Function Tool (synced with [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)) that intercepts both HTTP transport failures and call-time MCP errors, failing over from `customer_idv_primary` to `customer_idv_secondary`. |
 | **VPC-SC Policy Templates** | [`vpcsc_policies/`](vpcsc_policies/) | Ready-to-apply `gcloud access-context-manager perimeters update` YAML specifications for `egressPolicies` (`resources: ["*"]`) and `ingressPolicies` on `ces.googleapis.com`. |
 | **End-to-End Cloud Scripts** | [`scripts/`](scripts/) | Automated Python and Bash scripts that enable APIs, deploy the MCP server to Cloud Run, and execute all 10 verification test cases (`1A`, `1B-i`, `1B-ii`, `1B-iii`, `2-0`, `2-pre`, `2A`, `2B-i`, `2B-ii`, and `2C`) against the CXAS v1beta API. |
 
@@ -102,6 +109,8 @@ uv run python scripts/run_phase_a_mcp_and_a2a_baseline.py \
   --mcp-url="${MCP_URL}"
 ```
 
+*(Alternatively, you can push any of the three `cxas-scrapi` application bundles under [`cxas_app/`](cxas_app/README.md) directly using `cxas push`.)*
+
 ### Step 3: Run Phase B (VPC Service Controls A2A Matrix)
 
 Phase B places your test project inside an enforced VPC-SC service perimeter (`albion_a2a_repro_perimeter`) and runs the 5 progressive VPC-SC and IAM verification tests (`2-pre`, `2A`, `2B-i`, `2B-ii`, and `2C`), saving the diagnostic trace spans and responses to `phase_b_results.json`:
@@ -142,7 +151,13 @@ gecx-mcp-a2a-vpcsc/
 ├── LICENSE                                                # Apache-2.0 License
 ├── README.md                                              # Root onboarding & replication guide
 ├── CHANGELOG.md                                           # Chronological release notes
+├── cxaslint.yaml                                          # Linter configuration for cxas-scrapi
 ├── pyproject.toml                                         # Python dependencies & pytest config
+├── cxas_app/                                              # Complete cxas-scrapi CX Agent Studio app bundles
+│   ├── README.md                                          # Guide to linting, pushing, and pulling cxas_app bundles
+│   ├── Albion_Bank_MCP_Failover/                          # Scenario 1 app (steering_agent, idv_sub_agent, MCP toolsets)
+│   ├── Albion_Bank_Personal_Banking_A2A_Caller/           # Scenario 2 A2A caller app (RemoteAgentTool)
+│   └── Albion_Bank_Mortgage_Specialist_A2A_Target/        # Scenario 2 A2A target app (lookup_mortgage_rates)
 ├── mcp_server/
 │   ├── Dockerfile                                         # Non-root Cloud Run container definition
 │   ├── requirements.txt                                   # Pinned FastMCP & Starlette dependencies
@@ -150,7 +165,7 @@ gecx-mcp-a2a-vpcsc/
 ├── tools/
 │   └── verify_customer_identity/
 │       └── python_function/
-│           └── python_code.py                             # CXAS Python Function Tool failover wrapper
+│           └── python_code.py                             # Standalone reference path for verify_customer_identity
 ├── vpcsc_policies/
 │   ├── egress_a2a_cxas.yaml                               # VPC-SC Egress Rule (resources: ["*"])
 │   └── ingress_a2a_cxas.yaml                              # VPC-SC Ingress Rule for ces.googleapis.com
@@ -160,6 +175,7 @@ gecx-mcp-a2a-vpcsc/
 │   ├── run_phase_b_vpcsc_a2a.py                           # Runs Tests 2-pre, 2A, 2B-i, 2B-ii, and 2C
 │   └── teardown.sh                                        # Cleans up perimeter, CXAS apps, Cloud Run, SAs
 ├── tests/
+│   ├── test_cxas_apps.py                                  # Offline schema, callback, & tool tests for cxas_app/
 │   ├── test_mcp_server.py                                 # Offline ASGI tests for /mcp1 and /mcp2
 │   └── test_verify_customer_identity.py                   # Offline unit tests for failover controller
 └── docs/
@@ -173,7 +189,8 @@ gecx-mcp-a2a-vpcsc/
         └── verify_customer_identity.md                    # Specification for verify_customer_identity
 ```
 
+- **[CXAS Application Bundles Guide (`cxas_app/README.md`)](cxas_app/README.md)** — How to inspect, lint, push, and pull the three `cxas-scrapi` application bundles under `cxas_app/`.
 - **[Documentation Hub (`docs/README.md`)](docs/README.md)** — Start here for role-based navigation and a glossary of CXAS, MCP, A2A, and VPC-SC concepts.
 - **[MCP Error Handling, Regional Failover & A2A Technical Guide (`docs/guides/mcp_and_a2a_technical_guide.md`)](docs/guides/mcp_and_a2a_technical_guide.md)** — Detailed architectural explanation of MCP session initialization timing, `toolOverrides` schema snapshots, and VPC-SC evaluation of `A2AService.SendMessage`.
 - **[End-to-End Verification Walkthrough (`docs/architecture/end_to_end_verification_walkthrough.md`)](docs/architecture/end_to_end_verification_walkthrough.md)** — Complete walkthrough of all 10 test cases (`1A` through `2C`) with exact request/response payloads and Cloud Audit Log entries.
-- **[Python Tool Documentation (`docs/tools/README.md`)](docs/tools/README.md)** — Line-numbered specification and control-flow diagram for [`verify_customer_identity`](docs/tools/verify_customer_identity.md).
+- **[Python Tool Documentation (`docs/tools/README.md`)](docs/tools/README.md)** — Line-numbered specification and control-flow diagram for [`verify_customer_identity`](docs/tools/verify_customer_identity.md), `route_to_idv`, and `lookup_mortgage_rates`.

@@ -1,0 +1,14 @@
+{
+  "toolsets": {
+    "customer_idv_primary": {
+      "mcpToolset": {
+        "serverAddress": "https://YOUR_PRIMARY_MCP_URL/mcp1/"
+      }
+    },
+    "customer_idv_secondary": {
+      "mcpToolset": {
+        "serverAddress": "https://YOUR_SECONDARY_MCP_URL/mcp2/"
+      }
+    }
+  }
+}

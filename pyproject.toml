@@ -1,6 +1,6 @@
 [project]
 name = "gecx-mcp-a2a-vpcsc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reference implementation and verification testbed for CX Agent Studio (GECX) MCP regional failover and A2A connectivity under VPC Service Controls"
 readme = "README.md"
 license = "Apache-2.0"

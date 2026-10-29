@@ -1,0 +1,4 @@
+app_dir: cxas_app/Albion_Bank_MCP_Failover
+per_file:
+  "*mortgage_specialist.json":
+    T012: off

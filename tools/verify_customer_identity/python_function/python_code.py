@@ -1,4 +1,7 @@
-# Relevant imports for logging and type annotations
+# Controller tool for idv_sub_agent: verifies customer identity via primary MCP with secondary failover.
+# CXAS runtime globals: `context` (session state) and `tools` (MCP toolsets) are injected by the sandbox (no imports).
+# ruff: noqa: F821
+
 import logging
 from typing import Any
 
@@ -47,18 +50,23 @@ def verify_customer_identity(customer_id: str = "") -> dict[str, str]:
 
         # Step 4: Both regional MCP endpoints are unavailable; degrade gracefully.
         context.state["idv_status"] = "UNAVAILABLE"
+        context.state["escalation_reason"] = "IDV_REGIONS_UNAVAILABLE"
+        context.state["call_complete"] = "true"
         return {
             "agent_action": (
                 "Apologize that the automated verification service is temporarily unavailable "
-                "and offer to transfer the customer to a banking specialist."
+                "and let the customer know a banking specialist will assist them shortly."
             )
         }
     except Exception:
         logger.exception("verify_customer_identity failed")
+        context.state["idv_status"] = "UNAVAILABLE"
+        context.state["escalation_reason"] = "IDV_SYSTEM_ERROR"
+        context.state["call_complete"] = "true"
         return {
             "agent_action": (
                 "Apologize that the automated verification service encountered a technical issue "
-                "and transfer the customer to a banking specialist."
+                "and let the customer know a banking specialist will assist them shortly."
             )
         }
 
@@ -89,7 +97,10 @@ def _is_mcp_call_successful(resp: Any) -> bool:
 def _extract_verification_record(resp: Any) -> dict[str, Any]:
     """Unwraps the FastMCP text_output dictionary envelope returned by CXAS."""
     body = resp.json()
-    return body["text_output"][0]
+    text_output = body.get("text_output")
+    if not text_output:
+        return {}
+    return text_output[0]
 
 
 def _format_verified_action(

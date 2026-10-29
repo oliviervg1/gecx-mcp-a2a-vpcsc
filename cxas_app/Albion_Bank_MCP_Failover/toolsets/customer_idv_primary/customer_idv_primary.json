@@ -1,0 +1,16 @@
+{
+  "displayName": "customer_idv_primary",
+  "description": "Primary regional FastMCP identity verification toolset (/mcp1/ endpoint).",
+  "mcpToolset": {
+    "serverAddress": "https://YOUR_PRIMARY_MCP_URL/mcp1/",
+    "apiAuthentication": {
+      "serviceAgentIdTokenAuthConfig": {}
+    }
+  },
+  "toolFakeConfig": {
+    "enableFakeMode": true,
+    "codeBlock": {
+      "pythonCode": "toolsets/customer_idv_primary/tool_fake_config/code_block/python_code.py"
+    }
+  }
+}

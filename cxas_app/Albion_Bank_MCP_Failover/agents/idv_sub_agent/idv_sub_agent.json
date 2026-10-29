@@ -1,0 +1,23 @@
+{
+  "displayName": "idv_sub_agent",
+  "description": "Verifies customer identity across primary and secondary regional MCP endpoints via verify_customer_identity.",
+  "instruction": "agents/idv_sub_agent/instruction.txt",
+  "childAgents": [],
+  "tools": [
+    "verify_customer_identity",
+    "end_session"
+  ],
+  "toolsets": [],
+  "beforeModelCallbacks": [
+    {
+      "description": "agent_transfer",
+      "pythonCode": "agents/idv_sub_agent/before_model_callbacks/agent_transfer/python_code.py"
+    }
+  ],
+  "afterModelCallbacks": [
+    {
+      "description": "release_line",
+      "pythonCode": "agents/idv_sub_agent/after_model_callbacks/release_line/python_code.py"
+    }
+  ]
+}

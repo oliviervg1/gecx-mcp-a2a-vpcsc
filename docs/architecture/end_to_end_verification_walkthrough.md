@@ -11,7 +11,7 @@ This document walks through the 10 verification tests in [`scripts/run_phase_a_m
 | **Test 1A** | MCP Direct Toolset (Broken `/mcp1/`, No Snapshots) | `customer_idv` attached directly to `idv_sub_agent.toolsets[]` without `toolOverrides.snapshot`. | Outer `runSession` returns `400 FAILED_PRECONDITION`: `Failed to initialize MCP session for customer_idv ... HTTP status code 400 (Bad Request)`. | Reproduced entry-time crash |
 | **Test 1B-i** | MCP Python Controller + Unpinned Primary Failover (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) and `customer_idv_secondary` (`/mcp2/`), omitted from `idv_sub_agent.toolsets[]`, invoked from `verify_customer_identity`. | Outer `runSession` returns `200 OK`: Primary `/mcp1/` (`resp.ok == False`) caught in Python; automatic failover to `/mcp2/` (`europe-west1-secondary`). | Verified Stage 1 failover |
 | **Test 1B-ii** | MCP Python Controller + `toolOverrides` Patch on Primary (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) patched with `toolOverrides` and invoked from `verify_customer_identity` (note: `snapshot` is `Output only` on v1beta REST and populated via Console pinning; Stage 2 `status == "error"` is verified in unit tests). | Outer `runSession` returns `200 OK`: Primary `/mcp1/` failure caught in Python; automatic failover to `/mcp2/` (`europe-west1-secondary`). | Verified failover after REST patch |
-| **Test 1B-iii** | MCP Python Controller Graceful Degradation (Total Outage) | Both `customer_idv_primary` and `customer_idv_secondary` pointed at broken `/mcp1/` (`400`). | Expected / unit-test verified `200 OK`: Both failures caught in Python (`idv_status = "UNAVAILABLE"`); agent offers specialist transfer. | Verified graceful degradation |
+| **Test 1B-iii** | MCP Python Controller Graceful Degradation (Total Outage) | Both `customer_idv_primary` and `customer_idv_secondary` pointed at broken `/mcp1/` (`400`). | Expected / unit-test verified `200 OK`: Both failures caught in Python (`idv_status = "UNAVAILABLE"`, `call_complete = "true"`); agent informs the customer a banking specialist will assist shortly. | Verified graceful degradation |
 | **Test 2-0** | A2A Baseline (No VPC-SC Perimeter) | `personal-banking-a2a-caller` calls `mortgage-specialist-app` via native A2A tool before VPC-SC enforcement. | Outer `runSession` returns `200 OK`: Target Mortgage Specialist agent returns 5-year fixed rate (`4.15%`) and `10%` annual overpayment allowance. | Verified baseline A2A |
 | **Test 2-pre** | A2A Inside Enforced VPC-SC Prior to `allowedOrigins` | Project placed inside `albion_a2a_repro_perimeter` before `https://ces.googleapis.com` is added to `SecuritySettings.endpointControlPolicy.allowedOrigins`. | Outbound A2A request to `https://ces.googleapis.com` is blocked by CXAS outbound endpoint control until `https://ces.googleapis.com` is added to `allowedOrigins`. | Verified `allowedOrigins` gate |
 | **Test 2A** | A2A Inside Enforced VPC-SC Perimeter (No Egress Rules) | `https://ces.googleapis.com` added to `allowedOrigins`, but perimeter has zero egress rules for `service-123456789012@gcp-sa-ces.iam.gserviceaccount.com`. | Outer `runSession` returns `200 OK`; `Tool` trace span records `403 PERMISSION_DENIED` (`VPC_SERVICE_CONTROLS`), and Cloud Audit Logs record `egressViolations` (`RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER`). | Reproduced VPC-SC A2A failure |
@@ -80,13 +80,13 @@ With `customer_idv_primary` and `customer_idv_secondary` omitted from `idv_sub_a
 
 ### Expected Output (Unit-Test Verified) — Test 1B-iii (Graceful Degradation on Total Regional Outage)
 
-When both `customer_idv_primary` and `customer_idv_secondary` point to `/mcp1/` (HTTP 400), `verify_customer_identity` sets `context.state["idv_status"] = "UNAVAILABLE"` and returns a graceful fallback without crashing the session:
+When both `customer_idv_primary` and `customer_idv_secondary` point to `/mcp1/` (HTTP 400), `verify_customer_identity` sets `context.state["idv_status"] = "UNAVAILABLE"` and `context.state["call_complete"] = "true"` and returns a graceful fallback without crashing the session:
 
 ```json
 {
   "outputs": [
     {
-      "text": "I apologize, but our automated verification service is temporarily unavailable. Would you like me to transfer you to a banking specialist who can assist you?"
+      "text": "I apologize, but our automated verification service is temporarily unavailable. A banking specialist will assist you shortly."
     }
   ]
 }

@@ -1,0 +1,10 @@
+{
+  "name": "verify_customer_identity",
+  "displayName": "verify_customer_identity",
+  "executionType": "SYNCHRONOUS",
+  "pythonFunction": {
+    "name": "verify_customer_identity",
+    "pythonCode": "tools/verify_customer_identity/python_function/python_code.py",
+    "description": "Verifies a customer's identity via the primary MCP toolset with automatic failover to the secondary regional MCP toolset."
+  }
+}

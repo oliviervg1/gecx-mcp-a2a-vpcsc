@@ -1,0 +1,5 @@
+# cxas-scrapi T012 checks top-level tool descriptions and does not yet inspect
+# remoteAgentTool.description (which is validated by V003).
+per_file:
+  "*mortgage_specialist.json":
+    T012: off

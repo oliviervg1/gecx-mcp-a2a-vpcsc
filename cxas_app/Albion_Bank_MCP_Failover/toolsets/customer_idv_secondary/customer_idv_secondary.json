@@ -1,0 +1,16 @@
+{
+  "displayName": "customer_idv_secondary",
+  "description": "Secondary regional FastMCP identity verification toolset (/mcp2/ failover endpoint).",
+  "mcpToolset": {
+    "serverAddress": "https://YOUR_SECONDARY_MCP_URL/mcp2/",
+    "apiAuthentication": {
+      "serviceAgentIdTokenAuthConfig": {}
+    }
+  },
+  "toolFakeConfig": {
+    "enableFakeMode": true,
+    "codeBlock": {
+      "pythonCode": "toolsets/customer_idv_secondary/tool_fake_config/code_block/python_code.py"
+    }
+  }
+}
