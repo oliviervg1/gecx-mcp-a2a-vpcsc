@@ -1,0 +1,30 @@
+# VPC Service Controls Companion Ingress Rule for CX Agent Studio (GECX) A2A Calls
+#
+# Replace PROJECT_NUMBER, PROJECT_ID, ADMIN_USER_EMAIL, and CUSTOM_SA_NAME before applying:
+#   gcloud access-context-manager perimeters update PERIMETER_NAME \
+#     --policy=ACCESS_POLICY_ID \
+#     --set-ingress-policies=vpcsc_policies/ingress_a2a_cxas.yaml
+
+- ingressFrom:
+    identities:
+      - user:ADMIN_USER_EMAIL
+    sources:
+      - accessLevel: "*"
+  ingressTo:
+    operations:
+      - serviceName: "*"
+    resources:
+      - "*"
+- ingressFrom:
+    identities:
+      - serviceAccount:service-PROJECT_NUMBER@gcp-sa-ces.iam.gserviceaccount.com
+      - serviceAccount:CUSTOM_SA_NAME@PROJECT_ID.iam.gserviceaccount.com
+    sources:
+      - accessLevel: "*"
+  ingressTo:
+    operations:
+      - serviceName: ces.googleapis.com
+        methodSelectors:
+          - method: "*"
+    resources:
+      - projects/PROJECT_NUMBER

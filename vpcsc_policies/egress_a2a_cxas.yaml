@@ -1,0 +1,28 @@
+# VPC Service Controls Egress Policy for CX Agent Studio (GECX) A2A Calls
+#
+# Why resources: ["*"] is required:
+# In VPC Service Controls policy audit logs (cloudaudit.googleapis.com/policy),
+# outbound CXAS-to-CXAS A2A calls (lf.a2a.v1.A2AService.SendMessage on
+# ces.googleapis.com) are evaluated from the calling Service Account's project
+# container (source: projects/<PROJECT_NUMBER>) without a pre-populated target
+# project resource container, producing an egress violation with reason
+# RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER unless egressTo.resources is ["*"].
+#
+# Apply with:
+#   gcloud access-context-manager perimeters update <PERIMETER_NAME> \
+#     --policy=<ACCESS_POLICY_ID> \
+#     --set-egress-policies=vpcsc_policies/egress_a2a_cxas.yaml
+
+- egressFrom:
+    identities:
+      # 1. Default CXAS Service Agent (used when apiAuthentication is omitted on the A2A tool)
+      - serviceAccount:service-123456789012@gcp-sa-ces.iam.gserviceaccount.com
+      # 2. Optional Custom Service Account (used when serviceAccountAuthConfig is configured)
+      - serviceAccount:a2a-custom-caller@albion-gcp-project.iam.gserviceaccount.com
+  egressTo:
+    operations:
+      - serviceName: ces.googleapis.com
+        methodSelectors:
+          - method: "*"
+    resources:
+      - "*"
