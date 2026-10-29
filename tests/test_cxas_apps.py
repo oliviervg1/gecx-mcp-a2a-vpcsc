@@ -566,8 +566,6 @@ def test_run_session_camel_case_serialization_feeds_extract_a2a_spans(
         def __init__(
             self,
             app_name: str,
-            project_id: str,
-            location: str,
             creds: Any = None,
         ) -> None:
             self.app_name = app_name

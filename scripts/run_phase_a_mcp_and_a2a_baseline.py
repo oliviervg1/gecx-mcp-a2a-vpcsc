@@ -334,8 +334,6 @@ class CxasTestClient:
         app_name = self.app_resource_name(app_id)
         sessions_client = Sessions(
             app_name=app_name,
-            project_id=self.project_id,
-            location=self.location,
             creds=self.apps.creds,
         )
         try:
@@ -346,7 +344,6 @@ class CxasTestClient:
             ]
             raw_dict: dict[str, Any] = {
                 "outputs": outputs_list,
-                "structured": sessions_client.get_structured_response(resp),
             }
             return 200, raw_dict, session_id
         except google_exceptions.GoogleAPICallError as err:
@@ -384,6 +381,8 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
         include_overrides=False,
     )
     client.configure_idv_agent_mode(app_id, mode="direct_mcp", direct_toolset_id="customer_idv")
+    print("Waiting 65s for agent definition cache refresh...")
+    time.sleep(65)
 
     s1a_id = f"s1a-{uuid.uuid4().hex[:8]}"
     st1, _, _ = client.run_session(app_id, "hi", session_id=s1a_id)
@@ -435,8 +434,8 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
     overrides = patched_dict.get("mcpToolset", {}).get("toolOverrides", [])
     snapshot_persisted = bool(overrides and overrides[0].get("snapshot"))
     print(f"Primary toolset snapshot persisted via Tools.update_tool: {snapshot_persisted}")
-    print("Waiting 65s for toolset definition cache refresh...")
-    time.sleep(65)
+    print("Waiting 185s for 180s Memstore toolset cache expiry...")
+    time.sleep(185)
 
     s1bii_id = f"s1bii-{uuid.uuid4().hex[:8]}"
     client.run_session(app_id, "hi", session_id=s1bii_id)
@@ -462,8 +461,8 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
         server_address=f"{mcp_url}/mcp1/",
         include_overrides=True,
     )
-    print("Waiting 65s for toolset definition cache refresh...")
-    time.sleep(65)
+    print("Waiting 185s for 180s Memstore toolset cache expiry...")
+    time.sleep(185)
 
     s1biii_id = f"s1biii-{uuid.uuid4().hex[:8]}"
     client.run_session(app_id, "hi", session_id=s1biii_id)
@@ -500,6 +499,8 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
         replacements={"apps/mortgage-specialist-app": f"apps/{mortgage_app_id}"},
         custom_sa=None,
     )
+    print("Waiting 65s for A2A app definition cache refresh...")
+    time.sleep(65)
 
     s20_id = f"s20-{uuid.uuid4().hex[:8]}"
     client.run_session(caller_app_id, "hi", session_id=s20_id)

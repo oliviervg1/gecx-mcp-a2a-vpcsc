@@ -155,6 +155,65 @@ def update_perimeter(
         run_cmd(update_cmd)
 
 
+def ensure_custom_sa(
+    project_id: str,
+    custom_sa: str,
+    ces_sa: str,
+    account: str = "",
+) -> None:
+    """Ensures the custom A2A caller Service Account exists and grants Token Creator to the CXAS Service Agent."""
+    sa_name = custom_sa.split("@", 1)[0]
+    desc_cmd = [
+        "gcloud",
+        "iam",
+        "service-accounts",
+        "describe",
+        custom_sa,
+        f"--project={project_id}",
+    ]
+    if account:
+        desc_cmd.append(f"--account={account}")
+    exists = (
+        subprocess.run(
+            desc_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+    if not exists:
+        create_cmd = [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "create",
+            sa_name,
+            "--display-name=Albion Bank Custom A2A Caller SA",
+            f"--project={project_id}",
+            "--quiet",
+        ]
+        if account:
+            create_cmd.append(f"--account={account}")
+        run_cmd(create_cmd)
+        time.sleep(5)
+
+    bind_cmd = [
+        "gcloud",
+        "iam",
+        "service-accounts",
+        "add-iam-policy-binding",
+        custom_sa,
+        f"--project={project_id}",
+        f"--member=serviceAccount:{ces_sa}",
+        "--role=roles/iam.serviceAccountTokenCreator",
+        "--quiet",
+    ]
+    if account:
+        bind_cmd.append(f"--account={account}")
+    run_cmd(bind_cmd)
+
+
 def run_phase_b(
     client: CxasTestClient,
     project_number: str,
@@ -234,7 +293,8 @@ def run_phase_b(
       - "*"
 """
 
-    # Ensure custom_sa does not have roles/ces.client from a previous run so 2B-ii is reproducible
+    # Ensure custom_sa exists, has Token Creator for ces_sa, and does NOT have roles/ces.client from a previous run
+    ensure_custom_sa(client.project_id, custom_sa, ces_sa, client.account)
     remove_iam_cmd = [
         "gcloud",
         "projects",
@@ -248,7 +308,9 @@ def run_phase_b(
         remove_iam_cmd.append(f"--account={client.account}")
     subprocess.run(remove_iam_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
-    # Reset SecuritySettings allowedOrigins to empty via AgentServiceClient so Test 2-pre is reproducible
+    # Check if SecuritySettings allowedOrigins was non-empty before resetting to []
+    current_ss = client.apps.client.get_security_settings(name=f"{client.parent}/securitySettings")
+    had_allowed_origins = bool(current_ss.endpoint_control_policy.allowed_origins)
     client.update_security_settings(allowed_origins=[])
 
     # Push A2A target and caller bundles with default CXAS service agent (custom_sa=None) via cxas-scrapi
@@ -274,9 +336,21 @@ def run_phase_b(
         egress_yaml_content=None,
         account=client.account,
     )
-    time.sleep(20)
-    st_pre, resp_pre = run_a2a_turn(client, caller_app_id, prompt)
-    spans_pre = extract_a2a_spans(resp_pre)
+    if had_allowed_origins:
+        print("Waiting 190s (idle) for SecuritySettings cache expiry...")
+        time.sleep(190)
+    else:
+        time.sleep(20)
+    st_pre, resp_pre, spans_pre = 0, {}, []
+    for attempt in range(1, 6):
+        st_pre, resp_pre = run_a2a_turn(client, caller_app_id, prompt)
+        spans_pre = extract_a2a_spans(resp_pre)
+        dump_pre = json.dumps(resp_pre)
+        print(f"Test 2-pre (attempt {attempt}) -> HTTP {st_pre}, resp={dump_pre[:300]}")
+        if "not in the list of allowed origins" in dump_pre or "blocked as the project is protected by VPC-SC" in dump_pre:
+            break
+        print("Waiting 190s (idle) for remaining SecuritySettings task cache eviction...")
+        time.sleep(190)
     print(f"Test 2-pre -> HTTP {st_pre}, spans={json.dumps(spans_pre, indent=2)}")
     results["test_2_pre"] = {"status": st_pre, "spans": spans_pre, "response": resp_pre}
 
@@ -293,8 +367,16 @@ def run_phase_b(
 
     # 3. Test 2A: Default CXAS Service Agent without VPC-SC Egress Rule -> 403 VPC_SERVICE_CONTROLS
     print("\n=== Test 2A: Default CXAS Service Agent Without VPC-SC Egress Rule ===")
-    st_2a, resp_2a = run_a2a_turn(client, caller_app_id, prompt)
-    spans_2a = extract_a2a_spans(resp_2a)
+    st_2a, resp_2a, spans_2a = 0, {}, []
+    for attempt in range(1, 6):
+        st_2a, resp_2a = run_a2a_turn(client, caller_app_id, prompt)
+        spans_2a = extract_a2a_spans(resp_2a)
+        dump_2a = json.dumps(spans_2a)
+        print(f"Test 2A (attempt {attempt}) -> HTTP {st_2a}, spans={dump_2a[:300]}")
+        if "VPC_SERVICE_CONTROLS" in dump_2a and "ces.googleapis.com" in dump_2a:
+            break
+        print("Waiting 190s (idle) for remaining SecuritySettings task cache eviction...")
+        time.sleep(190)
     print(f"Test 2A -> HTTP {st_2a}, spans={json.dumps(spans_2a, indent=2)}")
     results["test_2A"] = {"status": st_2a, "spans": spans_2a, "response": resp_2a}
 
@@ -333,9 +415,15 @@ def run_phase_b(
         egress_yaml_content=egress_both_sas,
         account=client.account,
     )
-    time.sleep(25)
-    st_2bii, resp_2bii = run_a2a_turn(client, caller_app_id, prompt)
-    spans_2bii = extract_a2a_spans(resp_2bii)
+    st_2bii, resp_2bii, spans_2bii = 0, {}, []
+    for attempt in range(1, 10):
+        time.sleep(20)
+        st_2bii, resp_2bii = run_a2a_turn(client, caller_app_id, prompt)
+        spans_2bii = extract_a2a_spans(resp_2bii)
+        dump = json.dumps(spans_2bii)
+        print(f"Test 2B-ii (attempt {attempt}) -> HTTP {st_2bii}, spans={dump[:300]}")
+        if "PERMISSION_DENIED" in dump and "VPC_SERVICE_CONTROLS" not in dump:
+            break
     print(f"Test 2B-ii -> HTTP {st_2bii}, spans={json.dumps(spans_2bii, indent=2)}")
     results["test_2Bii"] = {"status": st_2bii, "spans": spans_2bii, "response": resp_2bii}
 
@@ -353,11 +441,14 @@ def run_phase_b(
     if client.account:
         iam_cmd.append(f"--account={client.account}")
     run_cmd(iam_cmd)
-    print("Waiting 60s for IAM binding propagation...")
-    time.sleep(60)
-    st_2c, resp_2c = run_a2a_turn(client, caller_app_id, prompt)
-    spans_2c = extract_a2a_spans(resp_2c)
-    print(f"Test 2C -> HTTP {st_2c}")
+    st_2c, resp_2c, spans_2c = 0, {}, []
+    for attempt in range(1, 10):
+        time.sleep(20)
+        st_2c, resp_2c = run_a2a_turn(client, caller_app_id, prompt)
+        spans_2c = extract_a2a_spans(resp_2c)
+        print(f"Test 2C (attempt {attempt}) -> HTTP {st_2c}")
+        if "4.15%" in json.dumps(resp_2c):
+            break
     print(json.dumps(resp_2c, indent=2))
     results["test_2C"] = {"status": st_2c, "spans": spans_2c, "response": resp_2c}
 
