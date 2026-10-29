@@ -45,6 +45,8 @@ def _load_tool_module(
     monkeypatch.setattr(builtins, "tools", tools_obj, raising=False)
     tool_path = (
         Path(__file__).resolve().parent.parent
+        / "cxas_app"
+        / "Albion_Bank_MCP_Failover"
         / "tools"
         / "verify_customer_identity"
         / "python_function"

@@ -61,7 +61,7 @@ done
 | :--- | :--- | :--- |
 | **`cxas-scrapi` Application Bundles** | [`cxas_app/`](cxas_app/) | Complete, `cxas lint`-clean CX Agent Studio application bundles (`Albion_Bank_MCP_Failover`, `Albion_Bank_Personal_Banking_A2A_Caller`, and `Albion_Bank_Mortgage_Specialist_A2A_Target`) ready for `cxas push` / `cxas pull`. See [`cxas_app/README.md`](cxas_app/README.md). |
 | **Dual-Route FastMCP Server** | [`mcp_server/main.py`](mcp_server/main.py) | Containerized Python server exposing `/mcp1` (simulates a broken regional proxy returning HTTP 400) and `/mcp2` (healthy FastMCP Streamable HTTP endpoint serving `verify_customer`). |
-| **Python Failover Controller** | [`tools/verify_customer_identity/python_function/python_code.py`](tools/verify_customer_identity/python_function/python_code.py) | Production CXAS Python Function Tool (synced with [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)) that intercepts both HTTP transport failures and call-time MCP errors, failing over from `customer_idv_primary` to `customer_idv_secondary`. |
+| **Python Failover Controller** | [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py) | Production CXAS Python Function Tool that intercepts both HTTP transport failures and call-time MCP errors, failing over from `customer_idv_primary` to `customer_idv_secondary`. |
 | **VPC-SC Policy Templates** | [`vpcsc_policies/`](vpcsc_policies/) | Ready-to-apply `gcloud access-context-manager perimeters update` YAML specifications for `egressPolicies` (`resources: ["*"]`) and `ingressPolicies` on `ces.googleapis.com`. |
 | **End-to-End Cloud Scripts** | [`scripts/`](scripts/) | Automated Python and Bash scripts that enable APIs, deploy the MCP server to Cloud Run, and execute all 10 verification test cases (`1A`, `1B-i`, `1B-ii`, `1B-iii`, `2-0`, `2-pre`, `2A`, `2B-i`, `2B-ii`, and `2C`) against the CXAS v1beta API. |
 
@@ -162,10 +162,6 @@ gecx-mcp-a2a-vpcsc/
 │   ├── Dockerfile                                         # Non-root Cloud Run container definition
 │   ├── requirements.txt                                   # Pinned FastMCP & Starlette dependencies
 │   └── main.py                                            # Dual-route (/mcp1 400, /mcp2 200) server
-├── tools/
-│   └── verify_customer_identity/
-│       └── python_function/
-│           └── python_code.py                             # Standalone reference path for verify_customer_identity
 ├── vpcsc_policies/
 │   ├── egress_a2a_cxas.yaml                               # VPC-SC Egress Rule (resources: ["*"])
 │   └── ingress_a2a_cxas.yaml                              # VPC-SC Ingress Rule for ces.googleapis.com

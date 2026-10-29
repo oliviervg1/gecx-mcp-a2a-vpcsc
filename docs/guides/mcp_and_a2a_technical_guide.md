@@ -99,7 +99,7 @@ First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model
 > [!TIP]
 > In the public CXAS v1beta REST reference (`McpToolOverride`), `snapshot` is marked `Output only` and is populated when pinning tool schemas in the CXAS Console. Because the MCP toolsets are omitted from `sub_agent.toolsets[]` and called exclusively from Python, sub-agent entry never triggers an unhandled `initialize` call regardless of whether `snapshot` is populated via REST.
 
-Second, invoke the MCP operation inside your Python Function Tool controller ([`tools/verify_customer_identity/python_function/python_code.py`](../../tools/verify_customer_identity/python_function/python_code.py)). When called from Python, CXAS returns two observable response shapes depending on whether the failure occurred during session/transport setup or as a call-time MCP error envelope:
+Second, invoke the MCP operation inside your Python Function Tool controller ([`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](../../cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)). When called from Python, CXAS returns two observable response shapes depending on whether the failure occurred during session/transport setup or as a call-time MCP error envelope:
 
 | Observed Python Response Shape | `resp.status_code` | `resp.ok` | `resp.text` / `resp.json()` |
 | :--- | :--- | :--- | :--- |

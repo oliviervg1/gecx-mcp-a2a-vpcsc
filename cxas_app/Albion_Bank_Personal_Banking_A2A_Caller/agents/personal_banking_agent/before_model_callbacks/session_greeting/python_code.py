@@ -27,7 +27,6 @@ def before_model_callback(
         LlmResponse containing the greeting on Turn 1, or None on subsequent turns.
     """
     try:
-        llm_request.config.hide_tool("end_session")
         if callback_context.state.get("session_greeted"):
             return None
 

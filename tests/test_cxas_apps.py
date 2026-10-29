@@ -130,20 +130,35 @@ def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
             assert forbidden not in tool_source, f"{tool_py} mentions '{forbidden}'"
 
 
-def test_verify_customer_identity_stays_synced_with_cxas_app() -> None:
-    """Ensures root tools/verify_customer_identity and cxas_app copy remain byte-for-byte identical."""
-    root_copy = (
-        REPO_ROOT / "tools" / "verify_customer_identity" / "python_function" / "python_code.py"
-    ).read_text(encoding="utf-8")
-    scrapi_copy = (
-        CXAS_APP_DIR
-        / "Albion_Bank_MCP_Failover"
-        / "tools"
-        / "verify_customer_identity"
-        / "python_function"
-        / "python_code.py"
-    ).read_text(encoding="utf-8")
-    assert root_copy == scrapi_copy
+def test_idv_sub_agent_before_model_hides_end_session_and_returned_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies idv_sub_agent before_model_callback hides end_session and returned tools."""
+    app_root = CXAS_APP_DIR / "Albion_Bank_MCP_Failover"
+    cb_mod, ctx = _load_py(
+        app_root
+        / "agents"
+        / "idv_sub_agent"
+        / "before_model_callbacks"
+        / "agent_transfer"
+        / "python_code.py",
+        monkeypatch,
+    )
+    hidden_tools: list[str] = []
+    tool_req = SimpleNamespace(
+        config=SimpleNamespace(hide_tool=lambda name: hidden_tools.append(name)),
+        contents=[
+            SimpleNamespace(
+                parts=[
+                    FakePart(
+                        function_response=SimpleNamespace(name="verify_customer_identity"),
+                    )
+                ]
+            )
+        ],
+    )
+    assert cb_mod.before_model_callback(ctx, tool_req) is None
+    assert hidden_tools == ["end_session", "verify_customer_identity"]
 
 
 def test_route_to_idv_and_silent_before_model_transfer(monkeypatch: pytest.MonkeyPatch) -> None:

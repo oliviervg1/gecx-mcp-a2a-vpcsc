@@ -2,6 +2,15 @@
 
 All notable changes to the Albion Bank CX Agent Studio (GECX) MCP Regional Failover and A2A VPC-SC Verification Suite are documented in this file.
 
+## [0.2.1] - 2026-10-29
+
+### Removed — Duplicate Root `tools/` Directory & Unreachable Callback Code
+
+- **Why:** Eliminate duplicated tool source files and unreachable callback paths after introducing the canonical `cxas-scrapi` application bundles under `cxas_app/`.
+- **Fix:** Removed the standalone duplicate `tools/verify_customer_identity/` directory at the repository root (consolidating on [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)), removed unreachable `release_line` / `hide_system_tools` callbacks and unused `call_complete` / `escalation_reason` state variables from the two A2A applications, and removed the unreachable `target_agent` transfer branch from `idv_sub_agent`'s `before_model_callback`.
+- **Test:** Verified all three apps pass `cxas lint` with 0 errors and 0 warnings, and all 17 unit tests pass in `pytest`.
+- **Docs:** Updated [`README.md`](README.md), [`docs/README.md`](docs/README.md), [`docs/guides/mcp_and_a2a_technical_guide.md`](docs/guides/mcp_and_a2a_technical_guide.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).
+
 ## [0.2.0] - 2026-10-29
 
 ### Added — Complete `cxas-scrapi`-Compatible Application Bundles (`cxas_app/`)
@@ -16,7 +25,7 @@ All notable changes to the Albion Bank CX Agent Studio (GECX) MCP Regional Failo
 ### Added — MCP Regional Failover Reference Implementation & Verification (`1A`, `1B-i`, `1B-ii`, `1B-iii`)
 
 - **Why:** Attaching an MCP toolset directly to a CXAS sub-agent causes the runtime to execute a live JSON-RPC `initialize` and `tools/list` handshake during turn preprocessing before any callbacks or tool wrappers run. If the primary regional proxy or MCP server returns HTTP 400 or becomes unreachable, the turn crashes immediately with an unhandled `400 FAILED_PRECONDITION` error.
-- **Fix:** Added [`mcp_server/main.py`](mcp_server/main.py) (dual-route FastMCP server exposing `/mcp1` returning HTTP 400 and `/mcp2` serving `verify_customer`) and [`tools/verify_customer_identity/python_function/python_code.py`](tools/verify_customer_identity/python_function/python_code.py), which omits MCP toolsets from the sub-agent's `toolsets` array and invokes them inside a Python Function Tool controller that fails over automatically from `customer_idv_primary` to `customer_idv_secondary` (or degrades gracefully when both regions fail).
+- **Fix:** Added [`mcp_server/main.py`](mcp_server/main.py) (dual-route FastMCP server exposing `/mcp1` returning HTTP 400 and `/mcp2` serving `verify_customer`) and [`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py), which omits MCP toolsets from the sub-agent's `toolsets` array and invokes them inside a Python Function Tool controller that fails over automatically from `customer_idv_primary` to `customer_idv_secondary` (or degrades gracefully when both regions fail).
 - **Test:** Verified offline in [`tests/test_verify_customer_identity.py`](tests/test_verify_customer_identity.py) and [`tests/test_mcp_server.py`](tests/test_mcp_server.py), and live against the CXAS v1beta API via [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](scripts/run_phase_a_mcp_and_a2a_baseline.py).
 - **Docs:** Documented in [`docs/guides/mcp_and_a2a_technical_guide.md`](docs/guides/mcp_and_a2a_technical_guide.md), [`docs/tools/README.md`](docs/tools/README.md), and [`docs/tools/verify_customer_identity.md`](docs/tools/verify_customer_identity.md).
 

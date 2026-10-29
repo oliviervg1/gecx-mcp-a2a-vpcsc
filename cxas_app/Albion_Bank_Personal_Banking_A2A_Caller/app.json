@@ -46,22 +46,6 @@
       }
     },
     {
-      "name": "call_complete",
-      "description": "Lifecycle flag set to 'true' when the call should end and 'released' once Part.from_end_session is emitted.",
-      "schema": {
-        "type": "STRING",
-        "required": []
-      }
-    },
-    {
-      "name": "escalation_reason",
-      "description": "Structured escalation or completion reason code.",
-      "schema": {
-        "type": "STRING",
-        "required": []
-      }
-    },
-    {
       "name": "last_agent_action",
       "description": "Last spoken prompt or guidance returned to the customer.",
       "schema": {

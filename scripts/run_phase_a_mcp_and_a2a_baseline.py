@@ -347,7 +347,13 @@ def run_phase_a(client: CxasTestClient, mcp_url: str, output_file: str) -> dict[
     print("\n=== Configuring Python Controller Tool for Tests 1B-i, 1B-ii, and 1B-iii ===")
     repo_root = Path(__file__).resolve().parent.parent
     python_code = (
-        repo_root / "tools" / "verify_customer_identity" / "python_function" / "python_code.py"
+        repo_root
+        / "cxas_app"
+        / "Albion_Bank_MCP_Failover"
+        / "tools"
+        / "verify_customer_identity"
+        / "python_function"
+        / "python_code.py"
     ).read_text(encoding="utf-8")
 
     ctrl_tool = client.upsert_tool(
