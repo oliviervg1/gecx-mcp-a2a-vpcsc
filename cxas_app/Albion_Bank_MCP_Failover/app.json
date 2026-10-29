@@ -70,14 +70,6 @@
       }
     },
     {
-      "name": "last_agent_action",
-      "description": "Last spoken prompt or guidance returned to the customer.",
-      "schema": {
-        "type": "STRING",
-        "required": []
-      }
-    },
-    {
       "name": "idv_status",
       "description": "Customer identity verification status ('VERIFIED' or 'UNAVAILABLE').",
       "schema": {

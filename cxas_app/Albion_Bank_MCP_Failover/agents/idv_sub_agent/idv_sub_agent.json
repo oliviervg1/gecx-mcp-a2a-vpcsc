@@ -10,8 +10,8 @@
   "toolsets": [],
   "beforeModelCallbacks": [
     {
-      "description": "agent_transfer",
-      "pythonCode": "agents/idv_sub_agent/before_model_callbacks/agent_transfer/python_code.py"
+      "description": "hide_system_tools",
+      "pythonCode": "agents/idv_sub_agent/before_model_callbacks/hide_system_tools/python_code.py"
     }
   ],
   "afterModelCallbacks": [

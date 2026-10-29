@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Removes the test VPC-SC service perimeter, deletes the test CXAS applications
-# and resets SecuritySettings allowedOrigins, deletes the Cloud Run FastMCP
-# service and test custom Service Account, and optionally deletes the GCP project.
+# and resets SecuritySettings allowedOrigins via cxas-scrapi, deletes the Cloud Run
+# FastMCP service and test custom Service Account, and optionally deletes the GCP project.
 #
 # Usage:
 #   ./scripts/teardown.sh \
@@ -10,6 +10,7 @@
 #     --location=eu \
 #     [--policy-id=987654321098] \
 #     [--perimeter-name=albion_a2a_repro_perimeter] \
+#     [--account=admin@example.com] \
 #     [--delete-project]
 
 set -euo pipefail
@@ -21,6 +22,7 @@ SERVICE_NAME="cxas-mcp-repro-server"
 CUSTOM_SA_NAME="a2a-custom-caller"
 POLICY_ID=""
 PERIMETER_NAME="albion_a2a_repro_perimeter"
+ACCOUNT="${CLOUDSDK_CORE_ACCOUNT:-}"
 DELETE_PROJECT="false"
 
 for arg in "$@"; do
@@ -32,10 +34,15 @@ for arg in "$@"; do
     --custom-sa-name=*) CUSTOM_SA_NAME="${arg#*=}" ;;
     --policy-id=*) POLICY_ID="${arg#*=}" ;;
     --perimeter-name=*) PERIMETER_NAME="${arg#*=}" ;;
+    --account=*) ACCOUNT="${arg#*=}" ;;
     --delete-project) DELETE_PROJECT="true" ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
+
+if [[ -n "${ACCOUNT}" ]]; then
+  export CLOUDSDK_CORE_ACCOUNT="${ACCOUNT}"
+fi
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "Error: --project-id is required." >&2
@@ -57,23 +64,36 @@ if [[ "${DELETE_PROJECT}" == "true" ]]; then
   exit 0
 fi
 
-TOKEN=$(gcloud auth print-access-token)
-BASE_URL="https://ces.googleapis.com/v1beta/projects/${PROJECT_ID}/locations/${LOCATION}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+echo "2. Deleting test CXAS applications and resetting SecuritySettings via cxas-scrapi in ${PROJECT_ID} (${LOCATION})..."
+(
+  cd "${REPO_ROOT}"
+  uv run python - "${PROJECT_ID}" "${LOCATION}" "${ACCOUNT}" <<'PY'
+import sys
+from google.api_core import exceptions as google_exceptions
+from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
-echo "2. Deleting test CXAS applications and resetting SecuritySettings in ${PROJECT_ID} (${LOCATION})..."
-for app_id in scenario1-mcp-repro personal-banking-a2a-caller mortgage-specialist-app; do
-  curl -sS -X DELETE \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -H "x-goog-user-project: ${PROJECT_ID}" \
-    "${BASE_URL}/apps/${app_id}?force=true" >/dev/null || true
-done
+project_id, location, account = sys.argv[1], sys.argv[2], sys.argv[3]
+client = CxasTestClient(project_id=project_id, location=location, account=account)
 
-curl -sS -X PATCH \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "x-goog-user-project: ${PROJECT_ID}" \
-  -H "Content-Type: application/json" \
-  -d '{"endpointControlPolicy":{"enforcementScope":"VPCSC_ONLY","allowedOrigins":[]}}' \
-  "${BASE_URL}/securitySettings?updateMask=endpointControlPolicy" >/dev/null || true
+for app_id in ("scenario1-mcp-repro", "personal-banking-a2a-caller", "mortgage-specialist-app"):
+    app_name = client.app_resource_name(app_id)
+    try:
+        op = client.apps.client.delete_app(name=app_name)
+        op.result()
+        print(f"Deleted CXAS app: {app_name}")
+    except google_exceptions.NotFound:
+        pass
+    except Exception as exc:
+        print(f"Warning deleting {app_name}: {exc}")
+
+try:
+    client.update_security_settings(allowed_origins=[])
+    print("Reset CXAS SecuritySettings allowedOrigins to [].")
+except Exception as exc:
+    print(f"Warning resetting SecuritySettings: {exc}")
+PY
+)
 
 echo "3. Deleting Cloud Run service ${SERVICE_NAME} in ${REGION}..."
 gcloud run services delete "${SERVICE_NAME}" \

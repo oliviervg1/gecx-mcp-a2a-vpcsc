@@ -12,11 +12,5 @@
       "description": "session_greeting",
       "pythonCode": "agents/personal_banking_agent/before_model_callbacks/session_greeting/python_code.py"
     }
-  ],
-  "afterModelCallbacks": [
-    {
-      "description": "release_line",
-      "pythonCode": "agents/personal_banking_agent/after_model_callbacks/release_line/python_code.py"
-    }
   ]
 }

@@ -1,4 +1,4 @@
-"""Offline unit tests for the cxas-scrapi application bundles under cxas_app/."""
+"""Offline unit tests for the cxas-scrapi application bundles and verification scripts."""
 
 import builtins
 import importlib.util
@@ -6,8 +6,14 @@ import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+import zipfile
 
+from google.cloud.ces_v1beta import types
+from google.protobuf import struct_pb2
 import pytest
+
+from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
+from scripts.run_phase_b_vpcsc_a2a import extract_a2a_spans
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CXAS_APP_DIR = REPO_ROOT / "cxas_app"
@@ -80,7 +86,7 @@ def _load_py(
 
 @pytest.mark.parametrize("app_name", APP_NAMES)
 def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
-    """Verifies app.json, environment.json, agent configs, childAgents tree, and instructions."""
+    """Verifies app.json, environment.json, agent configs, callbacks, childAgents tree, and instructions."""
     app_root = CXAS_APP_DIR / app_name
     app_json = json.loads((app_root / "app.json").read_text(encoding="utf-8"))
     assert app_json["name"] == app_name
@@ -106,6 +112,7 @@ def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
     assert (agents_dir / root_agent / f"{root_agent}.json").exists()
 
     parents_by_child: dict[str, list[str]] = {}
+    referenced_agent_callbacks: set[Path] = set()
     for agent_dir in agents_dir.iterdir():
         if not agent_dir.is_dir():
             continue
@@ -118,32 +125,104 @@ def test_cxas_app_structure_and_schema_invariants(app_name: str) -> None:
         for forbidden in FORBIDDEN_TRANSFER_WORDS:
             assert forbidden not in inst_text.lower(), f"{inst_path} mentions '{forbidden}'"
 
+        for cb_key in (
+            "beforeAgentCallbacks",
+            "afterAgentCallbacks",
+            "beforeModelCallbacks",
+            "afterModelCallbacks",
+            "beforeToolCallbacks",
+            "afterToolCallbacks",
+        ):
+            for cb in cfg.get(cb_key, []):
+                cb_path = (app_root / cb["pythonCode"]).resolve()
+                assert cb_path.exists(), f"Missing callback pythonCode: {cb_path}"
+                referenced_agent_callbacks.add(cb_path)
+
         for child in cfg.get("childAgents", []):
             parents_by_child.setdefault(child, []).append(agent_dir.name)
+
+    actual_agent_callbacks = {p.resolve() for p in agents_dir.rglob("python_code.py")}
+    assert actual_agent_callbacks == referenced_agent_callbacks, (
+        f"Unreferenced callback python_code.py under {agents_dir}: "
+        f"{actual_agent_callbacks - referenced_agent_callbacks}"
+    )
 
     for child, parents in parents_by_child.items():
         assert len(parents) == 1, f"Sub-agent {child} has multiple parents: {parents}"
 
-    for tool_py in (app_root / "tools").rglob("python_code.py"):
-        tool_source = tool_py.read_text(encoding="utf-8").lower()
-        for forbidden in FORBIDDEN_TRANSFER_WORDS:
-            assert forbidden not in tool_source, f"{tool_py} mentions '{forbidden}'"
+    tools_dir = app_root / "tools"
+    if tools_dir.exists():
+        for tool_dir in tools_dir.iterdir():
+            if not tool_dir.is_dir():
+                continue
+            t_cfg = json.loads((tool_dir / f"{tool_dir.name}.json").read_text(encoding="utf-8"))
+            if "pythonFunction" in t_cfg:
+                py_path = app_root / t_cfg["pythonFunction"]["pythonCode"]
+                assert py_path.exists(), f"Missing tool pythonCode: {py_path}"
+
+        for tool_py in tools_dir.rglob("python_code.py"):
+            tool_source = tool_py.read_text(encoding="utf-8").lower()
+            for forbidden in FORBIDDEN_TRANSFER_WORDS:
+                assert forbidden not in tool_source, f"{tool_py} mentions '{forbidden}'"
+
+    toolsets_dir = app_root / "toolsets"
+    if toolsets_dir.exists():
+        for ts_dir in toolsets_dir.iterdir():
+            if not ts_dir.is_dir():
+                continue
+            ts_path = ts_dir / f"{ts_dir.name}.json"
+            ts_text = ts_path.read_text(encoding="utf-8")
+            ts_cfg = json.loads(ts_text)
+            fake_code = ts_cfg.get("toolFakeConfig", {}).get("codeBlock", {}).get("pythonCode")
+            if fake_code:
+                assert (app_root / fake_code).exists(), f"Missing toolset fake pythonCode: {fake_code}"
+            parsed_ts = types.Toolset.from_json(ts_text)
+            assert len(parsed_ts.mcp_toolset.tool_overrides) == 1
+            override = parsed_ts.mcp_toolset.tool_overrides[0]
+            assert override.tool == "verify_customer"
+            assert "customer_id" in override.snapshot.input_schema.properties
 
 
-def test_verify_customer_identity_stays_synced_with_cxas_app() -> None:
-    """Ensures root tools/verify_customer_identity and cxas_app copy remain byte-for-byte identical."""
-    root_copy = (
-        REPO_ROOT / "tools" / "verify_customer_identity" / "python_function" / "python_code.py"
-    ).read_text(encoding="utf-8")
-    scrapi_copy = (
-        CXAS_APP_DIR
-        / "Albion_Bank_MCP_Failover"
-        / "tools"
-        / "verify_customer_identity"
-        / "python_function"
-        / "python_code.py"
-    ).read_text(encoding="utf-8")
-    assert root_copy == scrapi_copy
+def test_idv_sub_agent_hide_system_tools_on_both_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies idv_sub_agent hide_system_tools callback hides system tools and returned tools."""
+    app_root = CXAS_APP_DIR / "Albion_Bank_MCP_Failover"
+    cb_mod, ctx = _load_py(
+        app_root
+        / "agents"
+        / "idv_sub_agent"
+        / "before_model_callbacks"
+        / "hide_system_tools"
+        / "python_code.py",
+        monkeypatch,
+    )
+
+    # Non-tool pass hides end_session and transfer_to_agent.
+    non_tool_hidden: list[str] = []
+    non_tool_req = SimpleNamespace(
+        config=SimpleNamespace(hide_tool=lambda name: non_tool_hidden.append(name)),
+        contents=[SimpleNamespace(parts=[FakePart(text="My customer ID is CUST-101.")])],
+    )
+    assert cb_mod.before_model_callback(ctx, non_tool_req) is None
+    assert non_tool_hidden == ["end_session", "transfer_to_agent"]
+
+    # Post-tool pass hides end_session, transfer_to_agent, and verify_customer_identity.
+    post_tool_hidden: list[str] = []
+    tool_req = SimpleNamespace(
+        config=SimpleNamespace(hide_tool=lambda name: post_tool_hidden.append(name)),
+        contents=[
+            SimpleNamespace(
+                parts=[
+                    FakePart(
+                        function_response=SimpleNamespace(name="verify_customer_identity"),
+                    )
+                ]
+            )
+        ],
+    )
+    assert cb_mod.before_model_callback(ctx, tool_req) is None
+    assert post_tool_hidden == ["end_session", "transfer_to_agent", "verify_customer_identity"]
 
 
 def test_route_to_idv_and_silent_before_model_transfer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,3 +365,231 @@ def test_lookup_mortgage_rates_and_toolset_fakes(monkeypatch: pytest.MonkeyPatch
     )
     sec_ok = secondary_fake.fake_tool_call(None, {"customer_id": "CUST-101"}, None)
     assert sec_ok["text_output"][0]["region"] == "europe-west1-secondary"
+
+
+def test_cxas_test_client_push_app_bundle_stages_and_imports_via_scrapi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies CxasTestClient.push_app_bundle, resource resolution, and custom SA patching."""
+    captured_zip_entries: dict[str, str] = {}
+    patched_requests: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeApps:
+        def __init__(self, project_id: str, location: str, creds: Any = None) -> None:
+            self.project_id = project_id
+            self.location = location
+            self.creds = creds or "fake-creds"
+
+        def get_app(self, app_name: str) -> SimpleNamespace:
+            return SimpleNamespace(name=app_name)
+
+        def import_app(
+            self,
+            app_name: str,
+            local_path: str,
+            conflict_strategy: str,
+        ) -> SimpleNamespace:
+            assert conflict_strategy == "OVERWRITE"
+            captured_zip_entries.clear()
+            with zipfile.ZipFile(local_path) as zf:
+                for member in zf.namelist():
+                    if member.endswith(".json"):
+                        captured_zip_entries[member] = zf.read(member).decode("utf-8")
+            return SimpleNamespace(
+                result=lambda: SimpleNamespace(name=app_name, warnings=[])
+            )
+
+    class FakeTools:
+        def __init__(self, app_name: str, creds: Any = None) -> None:
+            self.app_name = app_name
+            self.client = SimpleNamespace(list_tools=lambda request: [])
+
+        def list_tools(self) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(
+                    name=f"{self.app_name}/tools/uuid-mortgage-123",
+                    display_name="mortgage_specialist",
+                    system_tool=SimpleNamespace(name=""),
+                ),
+                SimpleNamespace(
+                    name=f"{self.app_name}/tools/uuid-verify-456",
+                    display_name="verify_customer_identity",
+                    system_tool=SimpleNamespace(name=""),
+                ),
+                SimpleNamespace(
+                    name=f"{self.app_name}/toolsets/uuid-primary-111",
+                    display_name="customer_idv_primary",
+                    system_tool=SimpleNamespace(name=""),
+                ),
+            ]
+
+        def create_tool(
+            self,
+            tool_id: str,
+            display_name: str,
+            payload: dict[str, Any],
+            tool_type: str,
+        ) -> types.Toolset:
+            assert tool_type == "mcp_toolset"
+            return types.Toolset(
+                name=f"{self.app_name}/toolsets/{tool_id}",
+                display_name=display_name,
+                mcp_toolset=payload,
+            )
+
+        def update_tool(
+            self,
+            tool_name: str,
+            display_name: str,
+            mcp_toolset: types.McpToolset,
+            tool_fake_config: types.ToolFakeConfig,
+        ) -> types.Toolset:
+            return types.Toolset(
+                name=tool_name,
+                display_name=display_name,
+                mcp_toolset=mcp_toolset,
+                tool_fake_config=tool_fake_config,
+            )
+
+    class FakeAuthorizedSession:
+        def __init__(self, creds: Any) -> None:
+            self.creds = creds
+            self._stored_sa = ""
+
+        def get(self, url: str, headers: dict[str, str], timeout: int) -> SimpleNamespace:
+            body: dict[str, Any] = {"remoteAgentTool": {"name": "mortgage_specialist"}}
+            if self._stored_sa:
+                body["remoteAgentTool"]["apiAuthentication"] = {
+                    "serviceAccountAuthConfig": {"serviceAccount": self._stored_sa}
+                }
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+
+        def patch(
+            self,
+            url: str,
+            headers: dict[str, str],
+            json: dict[str, Any],
+            timeout: int,
+        ) -> SimpleNamespace:
+            patched_requests.append((url, json))
+            self._stored_sa = (
+                json["remoteAgentTool"]["apiAuthentication"]["serviceAccountAuthConfig"][
+                    "serviceAccount"
+                ]
+            )
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: json)
+
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Apps", FakeApps)
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Tools", FakeTools)
+    monkeypatch.setattr(
+        "scripts.run_phase_a_mcp_and_a2a_baseline.AuthorizedSession",
+        FakeAuthorizedSession,
+    )
+    client = CxasTestClient(project_id="albion-test-proj", location="eu")
+
+    # 1. Push MCP Failover bundle and verify toolFakeConfig.enableFakeMode is disabled for live runs
+    client.push_app_bundle(
+        app_id="scenario1-mcp-repro",
+        bundle_name="Albion_Bank_MCP_Failover",
+        replacements={
+            "https://YOUR_PRIMARY_MCP_URL": "https://mcp.example.run.app",
+            "https://YOUR_SECONDARY_MCP_URL": "https://mcp.example.run.app",
+        },
+    )
+    primary_ts = json.loads(
+        captured_zip_entries["agent/toolsets/customer_idv_primary/customer_idv_primary.json"]
+    )
+    assert primary_ts["mcpToolset"]["serverAddress"] == "https://mcp.example.run.app/mcp1/"
+    assert primary_ts["toolFakeConfig"]["enableFakeMode"] is False
+
+    # 2. Push A2A Caller bundle with a non-default target app ID and custom_sa
+    client.push_app_bundle(
+        app_id="personal-banking-a2a-caller",
+        bundle_name="Albion_Bank_Personal_Banking_A2A_Caller",
+        replacements={"apps/mortgage-specialist-app": "apps/custom-mortgage-target"},
+        custom_sa="a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com",
+    )
+    a2a_json = json.loads(
+        captured_zip_entries["agent/tools/mortgage_specialist/mortgage_specialist.json"]
+    )
+    url = a2a_json["remoteAgentTool"]["agentCard"]["supportedInterfaces"][0]["url"]
+    assert "projects/albion-test-proj/locations/eu/apps/custom-mortgage-target" in url
+    assert "apiAuthentication" not in a2a_json["remoteAgentTool"]
+    assert len(patched_requests) == 1
+    assert "tools/uuid-mortgage-123?updateMask=remoteAgentTool" in patched_requests[0][0]
+    assert (
+        patched_requests[0][1]["remoteAgentTool"]["apiAuthentication"][
+            "serviceAccountAuthConfig"
+        ]["serviceAccount"]
+        == "a2a-custom-caller@albion-test-proj.iam.gserviceaccount.com"
+    )
+    assert (
+        client.resolve_toolset_name("scenario1-mcp-repro", "customer_idv_primary")
+        == "projects/albion-test-proj/locations/eu/apps/scenario1-mcp-repro/toolsets/uuid-primary-111"
+    )
+    assert (
+        client.resolve_tool_name("scenario1-mcp-repro", "end_session")
+        == "projects/albion-test-proj/locations/eu/apps/scenario1-mcp-repro/tools/end_session"
+    )
+
+    # 3. Verify upsert_mcp_toolset on both create (Test 1A) and update (Test 1B) paths
+    created_ts = client.upsert_mcp_toolset(
+        "scenario1-mcp-repro",
+        "customer_idv",
+        server_address="https://mcp.example.run.app/mcp1/",
+        include_overrides=False,
+    )
+    assert created_ts.mcp_toolset.server_address == "https://mcp.example.run.app/mcp1/"
+    assert not created_ts.mcp_toolset.tool_overrides
+
+    updated_ts = client.upsert_mcp_toolset(
+        "scenario1-mcp-repro",
+        "customer_idv_primary",
+        server_address="https://mcp.example.run.app/mcp1/",
+        include_overrides=True,
+    )
+    assert updated_ts.name.endswith("/toolsets/uuid-primary-111")
+    assert updated_ts.mcp_toolset.tool_overrides[0].tool == "verify_customer"
+    assert updated_ts.tool_fake_config.enable_fake_mode is False
+
+
+def test_run_session_camel_case_serialization_feeds_extract_a2a_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies run_session emits camelCase SessionOutput dicts that extract_a2a_spans parses."""
+
+    class FakeApps:
+        def __init__(self, project_id: str, location: str, creds: Any = None) -> None:
+            self.creds = creds
+
+    class FakeSessions:
+        def __init__(
+            self,
+            app_name: str,
+            creds: Any = None,
+        ) -> None:
+            self.app_name = app_name
+
+        def run(self, session_id: str, text: str, modality: str) -> SimpleNamespace:
+            attrs = struct_pb2.Struct()
+            attrs.update({"error": "PERMISSION_DENIED: VPC_SERVICE_CONTROLS"})
+            child_span = types.Span(name="RemoteAgentTool", attributes=attrs)
+            root_span = types.Span(name="AgentTurn", child_spans=[child_span])
+            out = types.SessionOutput(
+                text="Sorry, I could not reach the specialist.",
+                diagnostic_info={"root_span": root_span},
+            )
+            return SimpleNamespace(outputs=[out])
+
+        def get_structured_response(self, resp: Any) -> dict[str, Any]:
+            return {"agent_responses": ["Sorry, I could not reach the specialist."]}
+
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Apps", FakeApps)
+    monkeypatch.setattr("scripts.run_phase_a_mcp_and_a2a_baseline.Sessions", FakeSessions)
+    client = CxasTestClient(project_id="albion-test-proj", location="eu")
+    status, raw_dict, _ = client.run_session("personal-banking-a2a-caller", "mortgage rates")
+    assert status == 200
+    spans = extract_a2a_spans(raw_dict)
+    assert len(spans) == 1
+    assert spans[0]["name"] == "RemoteAgentTool"
+    assert "VPC_SERVICE_CONTROLS" in spans[0]["attributes"]["error"]

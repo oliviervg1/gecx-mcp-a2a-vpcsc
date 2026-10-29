@@ -63,7 +63,7 @@ Detaching the MCP toolsets from the sub-agent's `toolsets` list and invoking the
 
 To prevent entry-time crashes and handle regional endpoint failures in Python, apply two configuration steps.
 
-First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model only sees your Python Function Tool controller) and pin tool schema snapshots on the MCP toolset resource (via the CXAS Console tool-pinning workflow or application export/import):
+First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model only sees your Python Function Tool controller) and pin tool schema snapshots on the MCP toolset resource (see [`customer_idv_primary.json`](../../cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_primary/customer_idv_primary.json) and [`customer_idv_secondary.json`](../../cxas_app/Albion_Bank_MCP_Failover/toolsets/customer_idv_secondary/customer_idv_secondary.json) in the `cxas-scrapi` bundle):
 
 ```json
 {
@@ -97,9 +97,9 @@ First, omit the MCP toolsets from the sub-agent's `toolsets` array (so the model
 ```
 
 > [!TIP]
-> In the public CXAS v1beta REST reference (`McpToolOverride`), `snapshot` is marked `Output only` and is populated when pinning tool schemas in the CXAS Console. Because the MCP toolsets are omitted from `sub_agent.toolsets[]` and called exclusively from Python, sub-agent entry never triggers an unhandled `initialize` call regardless of whether `snapshot` is populated via REST.
+> In the public CXAS v1beta REST reference (`McpToolOverride`), `snapshot` is marked `Output only` (bulk `ImportApp` strips `snapshot` on initial import, whereas `Tools.update_tool` / `UpdateToolset` and pinning tool schemas in the CXAS Console persist `snapshot` on the server resource). Because the MCP toolsets are omitted from `sub_agent.toolsets[]` and called exclusively from Python, sub-agent entry never triggers an unhandled `initialize` call regardless of whether `snapshot` is populated via REST.
 
-Second, invoke the MCP operation inside your Python Function Tool controller ([`tools/verify_customer_identity/python_function/python_code.py`](../../tools/verify_customer_identity/python_function/python_code.py)). When called from Python, CXAS returns two observable response shapes depending on whether the failure occurred during session/transport setup or as a call-time MCP error envelope:
+Second, invoke the MCP operation inside your Python Function Tool controller ([`cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](../../cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py)). When called from Python, CXAS returns two observable response shapes depending on whether the failure occurred during session/transport setup or as a call-time MCP error envelope:
 
 | Observed Python Response Shape | `resp.status_code` | `resp.ok` | `resp.text` / `resp.json()` |
 | :--- | :--- | :--- | :--- |
@@ -123,10 +123,10 @@ def _is_mcp_call_successful(resp: Any) -> bool:
 
 ### 2.5 Architectural Placement of Regional Failover
 
-As documented in the [CX Agent Studio Outbound Networking Patterns guide](https://cloud.google.com/gemini-enterprise-cx/cx-agent-studio/network/outbound#outbound-networking-patterns), Google Cloud recommends routing outbound private connectivity through a Service Directory entry backed by an Internal Application Load Balancer (ALB). Furthermore, because sequential application-level retries across unreachable regional endpoints incur initialization timeouts before the secondary call begins, combining network-level load balancing with application-level error handling provides the lowest latency:
+As documented in the [CX Agent Studio Outbound Networking Patterns guide](https://docs.cloud.google.com/gemini-enterprise-cx/cx-agent-studio/network/outbound#outbound_networking_patterns), Google Cloud recommends routing outbound private connectivity through a Service Directory entry backed by a Regional Internal Application Load Balancer (ALB). Note that Service Directory is regional and each CXAS application is limited to a single Service Directory configuration. Furthermore, because sequential application-level retries across unreachable endpoints incur initialization timeouts before the secondary call begins, combining network-level load balancing with application-level error handling provides the lowest latency:
 
-1. **Primary Regional Failover (Network & Load Balancer Layer):** Point your Service Directory service to a Regional or Cross-Region Internal Application Load Balancer with active health checks and outlier detection across regional Apigee backend groups. If an Apigee instance or regional MCP backend becomes unhealthy, the load balancer shifts traffic automatically in sub-second time without consuming CXAS tool timeout budgets.
-2. **Application Defense-in-Depth (Python Controller Wrapper):** Detach the MCP toolsets from the sub-agent configuration and invoke the MCP operations inside a Python controller tool. This ensures that even a complete proxy rejection or Service Directory outage is caught in Python and handled via a secondary endpoint or a graceful customer fallback.
+1. **Primary Failover (Network & Load Balancer Layer):** Point your Service Directory service to a Regional Internal Application Load Balancer with active health checks and outlier detection across your Apigee or MCP backend groups (or hybrid connectivity NEG targets). If an Apigee instance or MCP backend becomes unhealthy, the load balancer shifts traffic automatically in sub-second time without consuming CXAS tool timeout budgets.
+2. **Application Defense-in-Depth (Python Controller Wrapper):** Detach the MCP toolsets from the sub-agent configuration and invoke the MCP operations inside a Python controller tool. This ensures that even a complete proxy rejection or endpoint failure is caught in Python and handled via a secondary MCP toolset route or a graceful customer fallback.
 
 ---
 
@@ -162,7 +162,7 @@ gcloud logging read \
   --format=json
 ```
 
-In the returned log entry, inspect `protoPayload.authenticationInfo.principalEmail` (to confirm which service account identity authenticated the call) and `protoPayload.metadata.egressViolations` (which records `source: "projects/123456789012"` and `violationReason: "RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER"` on `lf.a2a.v1.A2AService.SendMessage`).
+In the returned log entry, inspect `protoPayload.authenticationInfo.principalEmail` (to confirm which service account identity authenticated the call) and `protoPayload.metadata.violationReason` / `protoPayload.metadata.egressViolations` (which record `source: "projects/123456789012"` and `violationReason: "RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER"` on `lf.a2a.v1.A2AService.SendMessage`).
 
 ### 3.3 Required VPC-SC, IAM, and CXAS Configuration
 

@@ -19,12 +19,12 @@ This directory contains three complete CX Agent Studio (GECX) application bundle
 1. **Decoupled MCP Toolsets with Python Controller Failover (`Albion_Bank_MCP_Failover`):**
    - `idv_sub_agent.json` sets `"toolsets": []` so CXAS never executes an unhandled entry-time MCP `initialize` or `tools/list` call during turn preprocessing.
    - Instead, `idv_sub_agent` calls [`verify_customer_identity`](Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py), which invokes `tools.customer_idv_primary_verify_customer` first and automatically fails over to `tools.customer_idv_secondary_verify_customer` when `/mcp1/` returns an HTTP error (`not resp.ok`) or a call-time MCP error envelope (`body.get("status") == "error"`).
-   - Both MCP toolsets include deterministic `toolFakeConfig` Python blocks (`tool_fake_config/code_block/python_code.py`) so you can test primary failure and secondary failover in the CXAS Simulator with **"Use mock tool responses"** enabled before deploying Cloud Run.
+   - Both MCP toolsets ([`customer_idv_primary.json`](Albion_Bank_MCP_Failover/toolsets/customer_idv_primary/customer_idv_primary.json) and [`customer_idv_secondary.json`](Albion_Bank_MCP_Failover/toolsets/customer_idv_secondary/customer_idv_secondary.json)) include a concrete `mcpToolset.toolOverrides` configuration (`tool: "verify_customer"`, `descriptionOverride`, and `snapshot.inputSchema`) alongside deterministic `toolFakeConfig` Python blocks (`tool_fake_config/code_block/python_code.py`) so you can test primary failure and secondary failover in the CXAS Simulator with **"Use mock tool responses"** enabled before deploying Cloud Run. Note that in the public CXAS v1beta API, `McpToolOverride.snapshot` is annotated `Output only` (so bulk `ImportApp` strips `snapshot` on initial import, whereas `Tools.update_tool` / `UpdateToolset` and pinning in the CXAS Console persist `snapshot` on the server resource).
 2. **Silent State-Driven Sub-Agent Transfers in `before_model_callback`:**
    - When `route_to_idv` sets `context.state["target_agent"] = "idv_sub_agent"`, the `agent_transfer` `before_model_callback` intercepts the post-tool pass (`_is_tool_response(llm_request) == True`), pops `target_agent`, and returns `Part.from_agent_transfer(agent="idv_sub_agent")` immediately—saving a redundant post-tool LLM pass and preventing `unexpected_function_call` errors.
 3. **A2A `RemoteAgentTool` & VPC-SC Custom Service Account Authentication (`Albion_Bank_Personal_Banking_A2A_Caller`):**
    - [`tools/mortgage_specialist/mortgage_specialist.json`](Albion_Bank_Personal_Banking_A2A_Caller/tools/mortgage_specialist/mortgage_specialist.json) defines the A2A `agentCard` (`protocolBinding: "HTTP+JSON"`, `protocolVersion: "1.0"`).
-   - In the Python client libraries (`google.cloud.ces_v1beta` and `google.cloud.ces_v1`) used by `cxas lint`, `RemoteAgentTool` exposes `name`, `description`, and `agentCard`. `cxas push` deploys Pattern 3A (same-perimeter default Service Agent authentication) directly. For Pattern 3B (cross-perimeter custom caller Service Account `a2a-custom-caller@YOUR_PROJECT_ID.iam.gserviceaccount.com`), attach `remoteAgentTool.apiAuthentication.serviceAccountAuthConfig.serviceAccount` in the CX Agent Studio Console or via a raw REST PATCH as [`scripts/run_phase_b_vpcsc_a2a.py`](../scripts/run_phase_b_vpcsc_a2a.py) does.
+   - Both [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](../scripts/run_phase_a_mcp_and_a2a_baseline.py) and [`scripts/run_phase_b_vpcsc_a2a.py`](../scripts/run_phase_b_vpcsc_a2a.py) push these application bundles directly using `cxas_scrapi.core.apps.Apps.import_app(..., conflict_strategy="OVERWRITE")` for Pattern 3A (same-perimeter default Service Agent), and for Pattern 3B (cross-perimeter custom caller Service Account `a2a-custom-caller@YOUR_PROJECT_ID.iam.gserviceaccount.com`) resolve the imported `mortgage_specialist` tool resource name via `Tools.list_tools()` and apply `remoteAgentTool.apiAuthentication.serviceAccountAuthConfig.serviceAccount` via `AuthorizedSession` (since the client `google.cloud.ces_v1beta.types.RemoteAgentTool` descriptor omits `api_authentication`).
 
 ---
 
@@ -82,7 +82,7 @@ done
 
 ```bash
 cxas pull \
-  --from "projects/${PROJECT_ID}/locations/eu/apps/${APP_ID}" \
-  --app-dir cxas_app/Albion_Bank_MCP_Failover \
+  "projects/${PROJECT_ID}/locations/eu/apps/${APP_ID}" \
+  --target-dir cxas_app/Albion_Bank_MCP_Failover \
   --overwrite
 ```

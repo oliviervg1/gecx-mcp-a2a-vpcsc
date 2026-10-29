@@ -26,7 +26,7 @@ Welcome to the documentation hub for the Albion Bank CX Agent Studio (GECX) MCP 
 - **[`architecture/end_to_end_verification_walkthrough.md`](architecture/end_to_end_verification_walkthrough.md)** — Detailed walkthrough of all 10 live verification test cases (`1A`, `1B-i`, `1B-ii`, `1B-iii`, `2-0`, `2-pre`, `2A`, `2B-i`, `2B-ii`, and `2C`), showing the exact CXAS API configurations, observed HTTP responses, and Cloud Audit Log `egressViolations` payloads.
 
 ### Tools
-- **[`tools/README.md`](tools/README.md)** — Overview of the Python controller tool pattern in CXAS, execution flow diagram, and line-numbered index into [`../tools/verify_customer_identity/python_function/python_code.py`](../tools/verify_customer_identity/python_function/python_code.py), `route_to_idv`, and `lookup_mortgage_rates`.
+- **[`tools/README.md`](tools/README.md)** — Overview of the Python controller tool pattern in CXAS, execution flow diagram, and line-numbered index into [`../cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py`](../cxas_app/Albion_Bank_MCP_Failover/tools/verify_customer_identity/python_function/python_code.py), `route_to_idv`, and `lookup_mortgage_rates`.
 - **[`tools/verify_customer_identity.md`](tools/verify_customer_identity.md)** — Full specification for `verify_customer_identity`, including its parameters, session state reads and writes (`idv_status`, `idv_region`, `escalation_reason`, `call_complete`), and two-stage MCP error detection logic.
 
 ---

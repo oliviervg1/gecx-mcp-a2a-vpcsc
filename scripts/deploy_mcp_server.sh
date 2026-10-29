@@ -9,7 +9,8 @@
 #     --project-id=albion-gcp-project \
 #     --region=europe-west2 \
 #     --service-name=cxas-mcp-repro-server \
-#     --custom-sa-name=a2a-custom-caller
+#     --custom-sa-name=a2a-custom-caller \
+#     [--account=admin@example.com]
 
 set -euo pipefail
 
@@ -18,6 +19,7 @@ PROJECT_ID=""
 REGION="europe-west2"
 SERVICE_NAME="cxas-mcp-repro-server"
 CUSTOM_SA_NAME="a2a-custom-caller"
+ACCOUNT="${CLOUDSDK_CORE_ACCOUNT:-}"
 
 for arg in "$@"; do
   case $arg in
@@ -25,9 +27,14 @@ for arg in "$@"; do
     --region=*) REGION="${arg#*=}" ;;
     --service-name=*) SERVICE_NAME="${arg#*=}" ;;
     --custom-sa-name=*) CUSTOM_SA_NAME="${arg#*=}" ;;
+    --account=*) ACCOUNT="${arg#*=}" ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
+
+if [[ -n "${ACCOUNT}" ]]; then
+  export CLOUDSDK_CORE_ACCOUNT="${ACCOUNT}"
+fi
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "Error: --project-id is required." >&2
@@ -76,13 +83,40 @@ for attempt in 1 2 3 4 5; do
   sleep 5
 done
 
-echo "4. Deploying ${SERVICE_NAME} to Cloud Run in ${PROJECT_ID} (${REGION})..."
-gcloud run deploy "${SERVICE_NAME}" \
-  --source="${REPO_ROOT}/mcp_server" \
+echo "3b. Ensuring Compute Engine default service account has roles/cloudbuild.builds.builder for Cloud Run source builds..."
+gcloud beta services identity create \
+  --service=compute.googleapis.com \
   --project="${PROJECT_ID}" \
-  --region="${REGION}" \
-  --no-allow-unauthenticated \
-  --quiet
+  --quiet >/dev/null 2>&1 || true
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+for attempt in 1 2 3 4 5; do
+  if gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${COMPUTE_SA}" \
+    --role="roles/cloudbuild.builds.builder" \
+    --quiet >/dev/null 2>&1; then
+    break
+  fi
+  echo "  Waiting for Compute SA IAM propagation (attempt ${attempt}/5)..."
+  sleep 5
+done
+
+echo "4. Deploying ${SERVICE_NAME} to Cloud Run in ${PROJECT_ID} (${REGION})..."
+for attempt in 1 2 3; do
+  if gcloud run deploy "${SERVICE_NAME}" \
+    --source="${REPO_ROOT}/mcp_server" \
+    --project="${PROJECT_ID}" \
+    --region="${REGION}" \
+    --no-allow-unauthenticated \
+    --quiet; then
+    break
+  fi
+  if [[ "${attempt}" -eq 3 ]]; then
+    echo "Error: Cloud Run deployment failed after 3 attempts." >&2
+    exit 1
+  fi
+  echo "  Retrying Cloud Run source deployment after initial IAM/Artifact Registry propagation (attempt ${attempt}/3)..."
+  sleep 10
+done
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
   --project="${PROJECT_ID}" \
