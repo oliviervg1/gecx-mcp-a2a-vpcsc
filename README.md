@@ -40,10 +40,10 @@ uv sync --extra dev
 uv run pytest -v
 ```
 
-The offline test suite (`19 passed`) verifies:
+The offline test suite (`20 passed`) verifies:
 - **`cxas-scrapi` Application Structure & Schema Invariants (`tests/test_cxas_apps.py`):** Validates `app.json`, `global_instruction.txt`, `environment.json`, single-parent `childAgents` trees, agent `instruction.txt` XML structure (`<role>`, `<persona>`, `<constraints>`, `<taskflow>`, `<examples>`), callback `pythonCode` path completeness, `mcpToolset.toolOverrides` schema definitions, silent `before_model_callback` sub-agent transfers (`Part.from_agent_transfer`), `lookup_mortgage_rates`, deterministic `toolFakeConfig` blocks, and `cxas-scrapi` bundle staging (`CxasTestClient.push_app_bundle`).
-- **Primary & Secondary MCP Failover (`tests/test_verify_customer_identity.py`):** Verifies primary `/mcp1` success (`idv_status = "VERIFIED"`, `idv_region = "europe-west2-primary"`), automatic failover to `/mcp2` on both Stage 1 HTTP 400 transport errors (`resp.ok == False`) and Stage 2 call-time MCP error envelopes (`body.get("status") == "error"`), missing customer ID prompting, and graceful specialist fallback when both regions fail (`idv_status = "UNAVAILABLE"`).
-- **Dual-Route FastMCP ASGI Server (`tests/test_mcp_server.py`):** Verifies `/healthz` (`200`), `/mcp1` (`400 Bad Request`), and `/mcp2` (`initialize` and `tools/call` for `verify_customer`).
+- **Primary & Secondary MCP Failover (`tests/test_verify_customer_identity.py`):** Verifies primary `/mcp1` success (`idv_status = "VERIFIED"`, `idv_region = "europe-west2-primary"`), automatic failover to `/mcp2` on Stage 1 HTTP 400 transport errors (`resp.ok == False`), Stage 2 call-time MCP error envelopes (`body.get("status") == "error"`), and malformed non-JSON primary responses, missing customer ID prompting, and graceful specialist fallback when both regions fail (`idv_status = "UNAVAILABLE"`).
+- **Dual-Route FastMCP ASGI Server (`tests/test_mcp_server.py`):** Verifies `/health` and `/healthz` (`200`), `/mcp1` (`400 Bad Request`), and `/mcp2` (`initialize` and `tools/call` for `verify_customer`).
 
 If you have [`cxas-scrapi`](https://github.com/GoogleCloudPlatform/cxas-scrapi) installed, you can also run `cxas lint` across all three application bundles:
 

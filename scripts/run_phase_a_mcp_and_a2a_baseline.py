@@ -13,6 +13,7 @@ using the cxas-scrapi SDK (Apps, Agents, Tools, Sessions):
 import argparse
 import datetime
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -78,9 +79,13 @@ class CxasTestClient:
     def __init__(self, project_id: str, location: str, account: str = "") -> None:
         self.project_id = project_id
         self.location = location
-        self.account = account
+        self.account = account or os.environ.get("CLOUDSDK_CORE_ACCOUNT", "")
         self.parent = f"projects/{project_id}/locations/{location}"
-        creds = GcloudAccountCredentials(account, project_id) if account else None
+        creds = (
+            GcloudAccountCredentials(self.account, project_id)
+            if self.account
+            else None
+        )
         self.apps = Apps(project_id=project_id, location=location, creds=creds)
 
     def app_resource_name(self, app_id: str) -> str:
@@ -348,11 +353,14 @@ class CxasTestClient:
             return 200, raw_dict, session_id
         except google_exceptions.GoogleAPICallError as err:
             status_code = int(err.code) if err.code else 400
+            status_name = (
+                err.grpc_status_code.name if err.grpc_status_code else "UNKNOWN"
+            )
             error_payload = {
                 "error": {
                     "code": status_code,
                     "message": err.message,
-                    "status": str(err.grpc_status_code),
+                    "status": status_name,
                 }
             }
             return status_code, error_payload, session_id

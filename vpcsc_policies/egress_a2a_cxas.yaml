@@ -12,6 +12,11 @@
 #   gcloud access-context-manager perimeters update <PERIMETER_NAME> \
 #     --policy=<ACCESS_POLICY_ID> \
 #     --set-egress-policies=vpcsc_policies/egress_a2a_cxas.yaml
+#
+# WARNING: --set-egress-policies overwrites ALL existing egress rules on the
+# target perimeter. In production environments, replace the placeholder project
+# number/ID below and merge this rule into your existing perimeter YAML or
+# Terraform configuration rather than overwriting the entire policy list.
 
 - egressFrom:
     identities:

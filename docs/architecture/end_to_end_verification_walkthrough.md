@@ -1,6 +1,6 @@
 # End-to-End Verification Walkthrough — Live Test Matrix (`1A` through `2C`)
 
-This document walks through the 10 verification tests in [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](../../scripts/run_phase_a_mcp_and_a2a_baseline.py) and [`scripts/run_phase_b_vpcsc_a2a.py`](../../scripts/run_phase_b_vpcsc_a2a.py) using de-identified empirical outputs captured in an isolated Google Cloud project (`albion-gcp-project`, project number `123456789012`, organization `111222333444`, access policy `987654321098`) protected by an enforced VPC Service Controls perimeter (`albion_a2a_repro_perimeter`). All 10 test cases have been verified end-to-end against live Google Cloud infrastructure using the `cxas-scrapi` SDK (`v0.3.0`).
+This document walks through the 10 verification tests in [`scripts/run_phase_a_mcp_and_a2a_baseline.py`](../../scripts/run_phase_a_mcp_and_a2a_baseline.py) and [`scripts/run_phase_b_vpcsc_a2a.py`](../../scripts/run_phase_b_vpcsc_a2a.py) using de-identified empirical outputs captured in an isolated Google Cloud project (`albion-gcp-project`, project number `123456789012`, organization `111222333444`, access policy `987654321098`) protected by an enforced VPC Service Controls perimeter (`albion_a2a_repro_perimeter`). All 10 test cases have been verified end-to-end against live Google Cloud infrastructure in release `v0.3.0` using the `cxas-scrapi` SDK (`>= 1.9.1`).
 
 ---
 
@@ -9,8 +9,8 @@ This document walks through the 10 verification tests in [`scripts/run_phase_a_m
 | Test ID | Scenario | Configuration Under Test | Observed HTTP / Runtime Result | Outcome |
 | :--- | :--- | :--- | :--- | :--- |
 | **Test 1A** | MCP Direct Toolset (Broken `/mcp1/`, No Snapshots) | `customer_idv` attached directly to `idv_sub_agent.toolsets[]` without `toolOverrides.snapshot`. | Outer `runSession` returns `400 FAILED_PRECONDITION`: `Failed to initialize MCP session for customer_idv ... HTTP status code 400 (Bad Request)`. | Reproduced entry-time crash |
-| **Test 1B-i** | MCP Python Controller + Unpinned Primary Failover (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) and `customer_idv_secondary` (`/mcp2/`), omitted from `idv_sub_agent.toolsets[]`, invoked from `verify_customer_identity`. | Outer `runSession` returns `200 OK`: Primary `/mcp1/` (`resp.ok == False`) caught in Python; automatic failover to `/mcp2/` (`secondary-euw1`). | Verified Stage 1 failover |
-| **Test 1B-ii** | MCP Python Controller + `toolOverrides` Update on Primary (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) updated with `toolOverrides` via `cxas-scrapi` (`Tools.update_tool`, with `snapshot_persisted_via_scrapi_update == True`) and invoked from `verify_customer_identity`. | Outer `runSession` returns `200 OK`: Primary `/mcp1/` failure caught in Python; automatic failover to `/mcp2/` (`secondary-euw1`). | Verified failover with `toolOverrides` |
+| **Test 1B-i** | MCP Python Controller + Unpinned Primary Failover (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) and `customer_idv_secondary` (`/mcp2/`), omitted from `idv_sub_agent.toolsets[]`, invoked from `verify_customer_identity`. | Outer `runSession` returns `200 OK`: Primary `/mcp1/` (`resp.ok == False`) caught in Python; automatic failover to `/mcp2/` (`europe-west1-secondary`). | Verified Stage 1 failover |
+| **Test 1B-ii** | MCP Python Controller + `toolOverrides` Update on Primary (`/mcp1/` -> `/mcp2/`) | `customer_idv_primary` (`/mcp1/`) updated with `toolOverrides` via `cxas-scrapi` (`Tools.update_tool`, with `snapshot_persisted_via_scrapi_update == True`) and invoked from `verify_customer_identity`. | Outer `runSession` returns `200 OK`: Primary `/mcp1/` failure caught in Python; automatic failover to `/mcp2/` (`europe-west1-secondary`). | Verified failover with `toolOverrides` |
 | **Test 1B-iii** | MCP Python Controller Graceful Degradation (Total Outage) | Both `customer_idv_primary` and `customer_idv_secondary` pointed at broken `/mcp1/` (`400`) after the 180s Memstore toolset cache window. | Outer `runSession` returns `200 OK`: Both failures caught in Python (`idv_status = "UNAVAILABLE"`, `call_complete = "true"`); agent informs the customer a banking specialist will assist shortly. | Verified graceful degradation |
 | **Test 2-0** | A2A Baseline (No VPC-SC Perimeter) | `personal-banking-a2a-caller` calls `mortgage-specialist-app` via native A2A tool before VPC-SC enforcement. | Outer `runSession` returns `200 OK`: Target Mortgage Specialist agent returns 5-year fixed rate (`4.15%`) and `10%` annual overpayment allowance. | Verified baseline A2A |
 | **Test 2-pre** | A2A Inside Enforced VPC-SC Prior to `allowedOrigins` | Project placed inside `albion_a2a_repro_perimeter` before `https://ces.googleapis.com` is added to `SecuritySettings.endpointControlPolicy.allowedOrigins`. | Outbound A2A request to `https://ces.googleapis.com` is blocked by CXAS outbound endpoint control until `https://ces.googleapis.com` is added to `allowedOrigins`. | Verified `allowedOrigins` gate |
@@ -78,7 +78,7 @@ With `customer_idv_primary` and `customer_idv_secondary` omitted from `idv_sub_a
 }
 ```
 
-### Expected Output (Unit-Test Verified) — Test 1B-iii (Graceful Degradation on Total Regional Outage)
+### Observed Output — Test 1B-iii (Graceful Degradation on Total Regional Outage)
 
 When both `customer_idv_primary` and `customer_idv_secondary` point to `/mcp1/` (HTTP 400), `verify_customer_identity` sets `context.state["idv_status"] = "UNAVAILABLE"` and `context.state["call_complete"] = "true"` and returns a graceful fallback without crashing the session:
 
@@ -128,14 +128,14 @@ Querying `cloudaudit.googleapis.com/policy` for that `vpcServiceControlsUniqueId
           "sourceType": "Resource",
           "targetResourcePermissions": [
             "ces.googleapis.com/A2AService.SendMessage"
-          ],
-          "violationReason": "RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER"
+          ]
         }
       ],
       "securityPolicyInfo": {
         "organizationId": "111222333444",
         "servicePerimeterName": "accessPolicies/987654321098/servicePerimeters/albion_a2a_repro_perimeter"
       },
+      "violationReason": "RESOURCES_NOT_IN_SAME_SERVICE_PERIMETER",
       "vpcServiceControlsUniqueId": "EGRESS_VIOLATION_EXAMPLE_ID"
     }
   }

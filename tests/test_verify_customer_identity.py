@@ -201,6 +201,40 @@ def test_unexpected_200_envelope_missing_text_output_fails_over_to_secondary(
     assert "CUST-303" in res["agent_action"]
 
 
+def test_primary_exception_or_malformed_json_fails_over_to_secondary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+
+    def primary_fn(_: dict[str, str]) -> FakeExternalResponse:
+        # Simulates non-JSON HTML error page with 200 OK causing resp.json() to raise JSONDecodeError
+        bad_resp = FakeExternalResponse(0, True, None)
+        bad_resp.text = "<html>Gateway Error</html>"
+        return bad_resp
+
+    def secondary_fn(args: dict[str, str]) -> FakeExternalResponse:
+        return FakeExternalResponse(
+            0,
+            True,
+            {
+                "text_output": [
+                    {
+                        "status": "VERIFIED",
+                        "customer_id": args["customer_id"],
+                        "region": "europe-west1-secondary",
+                    }
+                ]
+            },
+        )
+
+    mod = _load_tool_module(monkeypatch, ctx, FakeToolsNamespace(primary_fn, secondary_fn))
+    res = mod.verify_customer_identity("CUST-404")
+
+    assert ctx.state["idv_status"] == "VERIFIED"
+    assert ctx.state["idv_region"] == "europe-west1-secondary"
+    assert "CUST-404" in res["agent_action"]
+
+
 def test_both_regions_down_returns_graceful_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = FakeContext()
     tools_ns = FakeToolsNamespace(

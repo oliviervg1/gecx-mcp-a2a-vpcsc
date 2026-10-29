@@ -73,6 +73,7 @@ def create_app() -> TrailingSlashNormalizerMiddleware:
     base_app = mcp.streamable_http_app()
     base_app.add_route("/mcp1", unhealthy_primary_mcp, methods=["GET", "POST", "DELETE"])
     base_app.add_route("/mcp1/", unhealthy_primary_mcp, methods=["GET", "POST", "DELETE"])
+    base_app.add_route("/health", healthz, methods=["GET"])
     base_app.add_route("/healthz", healthz, methods=["GET"])
     return TrailingSlashNormalizerMiddleware(base_app)
 

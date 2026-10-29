@@ -73,13 +73,17 @@ def verify_customer_identity(customer_id: str = "") -> dict[str, str]:
 
 def _call_regional_mcp(mcp_tool_fn: Any, customer_id: str) -> dict[str, Any] | None:
     """Invokes a regional MCP toolset operation and returns the verified record if healthy."""
-    resp = mcp_tool_fn({"customer_id": customer_id})
-    if not _is_mcp_call_successful(resp):
+    try:
+        resp = mcp_tool_fn({"customer_id": customer_id})
+        if not _is_mcp_call_successful(resp):
+            return None
+        record = _extract_verification_record(resp)
+        if "region" not in record:
+            return None
+        return record
+    except Exception:
+        logger.warning("Regional MCP call failed", exc_info=True)
         return None
-    record = _extract_verification_record(resp)
-    if "region" not in record:
-        return None
-    return record
 
 
 def _is_mcp_call_successful(resp: Any) -> bool:

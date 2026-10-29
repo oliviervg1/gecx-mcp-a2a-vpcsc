@@ -10,6 +10,7 @@
 #     --location=eu \
 #     [--policy-id=987654321098] \
 #     [--perimeter-name=albion_a2a_repro_perimeter] \
+#     [--account=admin@example.com] \
 #     [--delete-project]
 
 set -euo pipefail
@@ -21,6 +22,7 @@ SERVICE_NAME="cxas-mcp-repro-server"
 CUSTOM_SA_NAME="a2a-custom-caller"
 POLICY_ID=""
 PERIMETER_NAME="albion_a2a_repro_perimeter"
+ACCOUNT="${CLOUDSDK_CORE_ACCOUNT:-}"
 DELETE_PROJECT="false"
 
 for arg in "$@"; do
@@ -32,10 +34,15 @@ for arg in "$@"; do
     --custom-sa-name=*) CUSTOM_SA_NAME="${arg#*=}" ;;
     --policy-id=*) POLICY_ID="${arg#*=}" ;;
     --perimeter-name=*) PERIMETER_NAME="${arg#*=}" ;;
+    --account=*) ACCOUNT="${arg#*=}" ;;
     --delete-project) DELETE_PROJECT="true" ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
+
+if [[ -n "${ACCOUNT}" ]]; then
+  export CLOUDSDK_CORE_ACCOUNT="${ACCOUNT}"
+fi
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "Error: --project-id is required." >&2
@@ -61,13 +68,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "2. Deleting test CXAS applications and resetting SecuritySettings via cxas-scrapi in ${PROJECT_ID} (${LOCATION})..."
 (
   cd "${REPO_ROOT}"
-  uv run python - "${PROJECT_ID}" "${LOCATION}" <<'PY'
+  uv run python - "${PROJECT_ID}" "${LOCATION}" "${ACCOUNT}" <<'PY'
 import sys
 from google.api_core import exceptions as google_exceptions
 from scripts.run_phase_a_mcp_and_a2a_baseline import CxasTestClient
 
-project_id, location = sys.argv[1], sys.argv[2]
-client = CxasTestClient(project_id=project_id, location=location)
+project_id, location, account = sys.argv[1], sys.argv[2], sys.argv[3]
+client = CxasTestClient(project_id=project_id, location=location, account=account)
 
 for app_id in ("scenario1-mcp-repro", "personal-banking-a2a-caller", "mortgage-specialist-app"):
     app_name = client.app_resource_name(app_id)

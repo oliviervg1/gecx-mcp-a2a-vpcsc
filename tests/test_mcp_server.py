@@ -12,9 +12,10 @@ import main as mcp_main  # noqa: E402
 
 def test_healthz_returns_200() -> None:
     with TestClient(mcp_main.create_app()) as client:
-        resp = client.get("/healthz")
-        assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        for path in ("/health", "/healthz"):
+            resp = client.get(path)
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "ok"}
 
 
 def test_mcp1_unhealthy_route_returns_400_bad_request() -> None:

@@ -4,6 +4,13 @@
 #   gcloud access-context-manager perimeters update PERIMETER_NAME \
 #     --policy=ACCESS_POLICY_ID \
 #     --set-ingress-policies=vpcsc_policies/ingress_a2a_cxas.yaml
+#
+# WARNING: --set-ingress-policies overwrites ALL existing ingress rules on the
+# target perimeter. The first rule (user:ADMIN_USER_EMAIL with serviceName: "*")
+# is strictly for isolated lab testing so the test runner can administer the
+# perimeter; omit it in production and merge only the second rule (scoped to
+# ces.googleapis.com and your Service Account principals) into your existing
+# perimeter YAML or Terraform configuration.
 
 - ingressFrom:
     identities:
